@@ -1,0 +1,993 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Ecash Mint Admin</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f0a00;color:#e2e8f0;min-height:100vh}
+.hdr{background:#1a1000;border-bottom:1px solid #3d2200;padding:14px 24px;display:flex;align-items:center;gap:12px}
+.hdr h1{font-size:1.15rem;font-weight:700;color:#f8fafc}
+.ver{font-size:.65rem;background:#f7931a;color:#0f0a00;padding:2px 8px;border-radius:12px;font-weight:700}
+.sta{margin-left:auto;font-size:.8rem;color:#64748b}
+.wrap{max-width:1200px;margin:0 auto;padding:20px 24px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:20px}
+.box{background:#1a1000;border:1px solid #3d2200;border-radius:10px;padding:16px}
+.num{font-size:1.8rem;font-weight:700;color:#f7931a}
+.num.sm{font-size:.9rem;word-break:break-all}
+.lbl{color:#94a3b8;font-size:.8rem;margin-top:4px}
+.card{background:#1a1000;border:1px solid #3d2200;border-radius:10px;margin-bottom:16px}
+.ch{padding:14px 18px;border-bottom:1px solid #3d2200;display:flex;align-items:center;justify-content:space-between;font-weight:600;font-size:.95rem}
+.cb{padding:18px}
+.tabs{display:flex;gap:2px;background:#0f0a00;padding:3px;border-radius:8px;margin-bottom:20px;width:fit-content;border:1px solid #3d2200;flex-wrap:wrap}
+.tab{padding:7px 14px;border-radius:6px;cursor:pointer;font-size:.82rem;font-weight:500;color:#94a3b8;border:none;background:transparent;transition:all .15s}
+.tab.on{background:#f7931a;color:#0f0a00;font-weight:700}
+.tab:hover:not(.on){color:#f7931a}
+.sec{display:none}.sec.on{display:block}
+.tbl{width:100%;border-collapse:collapse}
+.tbl th{text-align:left;padding:10px 12px;background:#0f0a00;color:#94a3b8;font-size:.78rem;text-transform:uppercase;letter-spacing:.5px;font-weight:600}
+.tbl td{padding:10px 12px;border-top:1px solid #1f1500;font-size:.85rem}
+.tbl tr:hover td{background:#1f1500}
+.badge{display:inline-block;padding:2px 10px;border-radius:12px;font-size:.72rem;font-weight:600}
+.b-active{background:#062e16;color:#34d399}
+.b-inactive{background:#1f2937;color:#9ca3af}
+.b-paid{background:#062e16;color:#34d399}
+.b-unpaid{background:#3d1a00;color:#fbbf24}
+.b-issued{background:#1e1b4b;color:#a78bfa}
+.b-pending{background:#3d1a00;color:#fb923c}
+.b-expired{background:#1f2937;color:#9ca3af}
+.b-spent{background:#7f1d1d;color:#fca5a5}
+.b-unspent{background:#062e16;color:#34d399}
+.mono{font-family:'SF Mono',Consolas,monospace;font-size:.8rem}
+.muted{color:#64748b}
+.accent{color:#f7931a}
+.kgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:8px}
+.ki{background:#0f0a00;border:1px solid #3d2200;border-radius:8px;padding:10px;text-align:center;cursor:pointer;transition:border-color .15s}
+.ki:hover{border-color:#f7931a}
+.ka{font-size:1rem;font-weight:700;color:#f7931a}
+.kp{font-size:.6rem;color:#64748b;word-break:break-all;margin-top:4px}
+.btn{padding:8px 16px;background:#f7931a;color:#0f0a00;border:none;border-radius:8px;cursor:pointer;font-size:.82rem;font-weight:700;transition:all .15s;white-space:nowrap}
+.btn:hover{background:#e8840f}
+.btn:disabled{background:#3d2200;color:#64748b;cursor:not-allowed}
+.btn-sm{padding:5px 10px;font-size:.75rem;border-radius:6px}
+.btn-sec{background:#3d1a00;color:#f7931a;border:1px solid rgba(247,147,26,0.3)}
+.btn-sec:hover:not(:disabled){background:#4d2a00}
+.btn-danger{background:#7f1d1d;color:#fca5a5}
+.btn-danger:hover{background:#991b1b}
+.rbtn{background:transparent;border:1px solid #3d2200;color:#94a3b8;padding:5px 10px;border-radius:6px;cursor:pointer;font-size:.78rem}
+.rbtn:hover{border-color:#f7931a;color:#f7931a}
+.fld{display:flex;flex-direction:column;gap:4px;margin-bottom:12px}
+.fld label{font-size:.8rem;color:#94a3b8}
+.fld input,.fld select,.fld textarea{width:100%;background:#0f0a00;border:1px solid #3d2200;color:#e2e8f0;padding:8px 12px;border-radius:8px;font-size:.85rem;font-family:'SF Mono',Consolas,monospace}
+.fld textarea{min-height:60px;resize:vertical}
+.frow{display:flex;gap:8px;align-items:flex-end}
+.frow .fld{flex:1;margin-bottom:0}
+.res{margin-top:12px;padding:12px;background:#0f0a00;border:1px solid #3d2200;border-radius:8px;font-family:monospace;font-size:.78rem;white-space:pre-wrap;word-break:break-all;color:#fbbf24;max-height:300px;overflow-y:auto;display:none}
+.res.err{color:#fca5a5;border-color:#7f1d1d;background:#1c0505}
+.res.ok{color:#86efac;border-color:#065f46}
+.hint{font-size:.72rem;color:#64748b;margin-top:4px}
+.toast{position:fixed;bottom:20px;right:20px;background:#f7931a;color:#0f0a00;padding:10px 20px;border-radius:8px;font-weight:700;font-size:.85rem;opacity:0;transition:opacity .3s;pointer-events:none;z-index:999}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+.dot-ok{background:#34d399}
+.dot-warn{background:#fbbf24}
+.dot-err{background:#f87171}
+.empty{padding:32px;text-align:center;color:#64748b;font-size:.85rem}
+.detail-back{cursor:pointer;color:#f7931a;font-size:.85rem;margin-bottom:12px;display:inline-block}
+.detail-back:hover{text-decoration:underline}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:768px){.split{grid-template-columns:1fr}.grid{grid-template-columns:repeat(2,1fr)}}
+.q-filter{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}
+.q-filter button{padding:4px 12px;border-radius:14px;font-size:.75rem;border:1px solid #3d2200;background:transparent;color:#94a3b8;cursor:pointer}
+.q-filter button.on{background:#f7931a;color:#0f0a00;border-color:#f7931a;font-weight:600}
+.q-filter button:hover:not(.on){border-color:#f7931a;color:#f7931a}
+.gauge{height:6px;background:#1f1500;border-radius:3px;overflow:hidden;margin-top:8px}
+.gauge-fill{height:100%;background:#f7931a;border-radius:3px;transition:width .3s}
+.val-section{border-left:3px solid #f7931a;padding-left:12px;margin-bottom:16px}
+.val-section .hint-label{color:#f7931a;font-size:.7rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px}
+.srow.danger{border:1px solid #7f1d1d;background:#1a0e0e;border-radius:6px;padding:8px;margin-top:8px}
+.warn{color:#fca5a5;font-size:12px;margin-left:8px}
+</style>
+</head>
+<body>
+<div class="hdr">
+  <span style="font-size:1.4rem">&#x20BF;</span>
+  <h1>Ecash Mint</h1>
+  <span class="ver">Admin</span>
+  <span class="sta" id="sta">Loading...</span>
+</div>
+<div class="wrap">
+  <div class="grid" id="stats"></div>
+  <div class="tabs" id="main-tabs">
+    <button class="tab on" data-tab="ov">Overview</button>
+    <button class="tab" data-tab="ks">Keysets</button>
+    <button class="tab" data-tab="qt">Quotes</button>
+    <button class="tab" data-tab="tk">Tokens</button>
+    <button class="tab" data-tab="ln">Lightning</button>
+    <button class="tab" data-tab="nf">Info</button>
+  </div>
+
+  <!-- Overview Tab -->
+  <div id="sec-ov" class="sec on">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;font-size:.82rem;color:#94a3b8">
+      <label><input type="checkbox" id="autorefresh" checked> auto-refresh</label> <span id="updated"></span>
+    </div>
+    <div class="val-section">
+      <div class="hint-label">&#x20BF; Value-bearing</div>
+      <div class="card" id="ov-liability-card">
+        <div class="ch"><span>Outstanding Liability</span></div>
+        <div class="cb" id="ov-liability"><em class="muted">Loading...</em></div>
+      </div>
+      <div class="split">
+        <div class="card">
+          <div class="ch"><span>Mint Quotes</span></div>
+          <div class="cb" id="ov-mint-quotes"><em class="muted">Loading...</em></div>
+        </div>
+        <div class="card">
+          <div class="ch"><span>Melt Quotes</span></div>
+          <div class="cb" id="ov-melt-quotes"><em class="muted">Loading...</em></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="ch"><span>Active Keyset</span><button class="rbtn" onclick="loadOverview()">Refresh</button></div>
+        <div class="cb" id="ov-keyset"><em class="muted">Loading...</em></div>
+      </div>
+    </div>
+    <div class="val-section">
+      <div class="hint-label">Mint configuration</div>
+    <div class="card">
+      <div class="ch"><span>Mint Settings</span></div>
+      <div class="cb">
+        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+          <div class="fld" style="flex:1;min-width:140px">
+            <label>Fee Reserve (%)</label>
+            <input id="st-fee-pct" type="number" min="0" placeholder="100">
+            <div class="hint">Basis points (100 = 1%)</div>
+          </div>
+          <div class="fld" style="flex:1;min-width:140px">
+            <label>Fee Reserve Min (sats)</label>
+            <input id="st-fee-min" type="number" min="0" placeholder="10">
+          </div>
+          <div class="fld" style="flex:1;min-width:140px">
+            <label>Quote TTL (seconds)</label>
+            <input id="st-ttl" type="number" min="60" placeholder="3600">
+            <div class="hint">Default: 3600 (1 hour)</div>
+          </div>
+          <button class="btn btn-sm" onclick="updateSettings()">Save</button>
+        </div>
+        <div class="srow danger">
+          <label><input type="checkbox" id="self-enabled"> Enable <code>self</code> mint/melt</label>
+          <span class="warn">&#x26A0; lets anyone mint tokens with no payment — testing only; leave OFF in production</span>
+        </div>
+        <div class="res" id="st-res"></div>
+      </div>
+    </div>
+    </div>
+  </div>
+
+  <!-- Keysets Tab -->
+  <div id="sec-ks" class="sec">
+    <div id="ks-list-view">
+      <div class="card">
+        <div class="ch">
+          <span>All Keysets</span>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-sm" onclick="generateKeyset()">Generate New</button>
+            <button class="rbtn" onclick="loadKeysets()">Refresh</button>
+          </div>
+        </div>
+        <div class="cb" id="ks-body"><em class="muted">Loading...</em></div>
+      </div>
+      <div class="res" id="ks-action-res"></div>
+    </div>
+    <div id="ks-detail-view" style="display:none">
+      <span class="detail-back" onclick="showKeysetList()">&larr; Back to keysets</span>
+      <div class="card">
+        <div class="ch"><span>Keyset Detail</span></div>
+        <div class="cb" id="ks-detail"><em class="muted">Loading...</em></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Quotes Tab -->
+  <div id="sec-qt" class="sec">
+    <div class="card">
+      <div class="ch"><span>All Quotes</span><button class="rbtn" onclick="loadQuotes()">Refresh</button></div>
+      <div class="cb">
+        <div class="q-filter" id="qt-filter">
+          <button class="on" data-f="all">All</button>
+          <button data-f="mint">Mint</button>
+          <button data-f="melt">Melt</button>
+          <button data-f="UNPAID">Unpaid</button>
+          <button data-f="PAID">Paid</button>
+          <button data-f="ISSUED">Issued</button>
+        </div>
+        <div id="qt-body"><em class="muted">Loading...</em></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tokens Tab -->
+  <div id="sec-tk" class="sec">
+    <div class="split">
+      <div class="card">
+        <div class="ch"><span>Spent Tokens</span><button class="rbtn" onclick="loadSpent()">Refresh</button></div>
+        <div class="cb" id="tk-spent"><em class="muted">Loading...</em></div>
+      </div>
+      <div class="card">
+        <div class="ch"><span>Check Token State</span></div>
+        <div class="cb">
+          <div class="fld">
+            <label>Secret or Y-point (hex)</label>
+            <input id="tk-check-input" placeholder="Enter secret string or 02/03... compressed point">
+          </div>
+          <button class="btn btn-sm" onclick="checkSpent()">Check</button>
+          <div class="res" id="tk-check-res"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Lightning Tab -->
+  <div id="sec-ln" class="sec">
+    <div class="split">
+      <div class="card">
+        <div class="ch"><span>Current Backend</span><button class="rbtn" onclick="loadLightning()">Refresh</button></div>
+        <div class="cb" id="ln-body"><em class="muted">Loading...</em></div>
+      </div>
+      <div class="card">
+        <div class="ch"><span>Configure Backend</span></div>
+        <div class="cb">
+          <div class="fld">
+            <label>Backend Type</label>
+            <select id="ln-type" onchange="toggleLnFields()">
+              <option value="lnbits">LNbits</option>
+              <option value="lnd">LND</option>
+              <option value="none">None (disable)</option>
+            </select>
+          </div>
+          <div id="ln-fields">
+            <div class="fld">
+              <label>URL</label>
+              <input id="ln-url" placeholder="http://localhost:3338">
+            </div>
+            <div class="fld" id="ln-apikey-field">
+              <label>API Key</label>
+              <input id="ln-apikey" placeholder="admin API key" type="password">
+            </div>
+            <div class="fld" id="ln-macaroon-field" style="display:none">
+              <label>Macaroon (hex)</label>
+              <input id="ln-macaroon" placeholder="hex-encoded macaroon" type="password">
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:4px">
+            <button class="btn btn-sm" onclick="configureLn()">Save</button>
+            <button class="btn btn-sm btn-sec" onclick="testLn()">Test</button>
+          </div>
+          <div class="res" id="ln-config-res"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Info Tab -->
+  <div id="sec-nf" class="sec">
+    <div class="split">
+      <div class="card">
+        <div class="ch"><span>Mint Information (NUT-06)</span><button class="rbtn" onclick="loadInfo()">Refresh</button></div>
+        <div class="cb" id="nf-body"><em class="muted">Loading...</em></div>
+      </div>
+      <div class="card">
+        <div class="ch"><span>Edit Mint Info</span></div>
+        <div class="cb">
+          <div class="fld">
+            <label>Mint Name</label>
+            <input id="nf-name" placeholder="ecash-mint">
+          </div>
+          <div class="fld">
+            <label>Description</label>
+            <input id="nf-desc" placeholder="Cashu ecash mint on Urbit">
+          </div>
+          <button class="btn btn-sm" onclick="updateInfo()">Save</button>
+          <div class="res" id="nf-res"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast">Copied!</div>
+
+<script type="module">
+const ADMIN = "/apps/ecash/admin/api";
+const PUB = "/apps/ecash";
+let allQuotes = [];
+
+// ── Helpers ──────────────────────────────────────────────────
+async function api(base, path, opts) {
+  const r = await fetch(base + path, opts);
+  if (!r.ok) {
+    let detail;
+    try { detail = await r.json(); } catch { detail = await r.text(); }
+    throw new Error(typeof detail === 'object' ? JSON.stringify(detail) : detail || "HTTP " + r.status);
+  }
+  return r.json();
+}
+const adminApi = (p, o) => api(ADMIN, p, o);
+const pubApi = (p, o) => api(PUB, p, o);
+
+const esc = (s) => String(s == null ? '' : s)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/'/g, '&#39;').replace(/"/g, '&quot;');
+
+function box(val, label, cls) {
+  const isLong = String(val).length > 16;
+  return `<div class="box"><div class="num ${isLong ? 'sm' : ''} ${cls || ''}">${esc(val)}</div><div class="lbl">${esc(label)}</div></div>`;
+}
+
+function badge(text, type) {
+  return `<span class="badge b-${type}">${esc(text)}</span>`;
+}
+
+function timeAgo(unix) {
+  if (!unix) return '?';
+  const secs = Math.floor(Date.now() / 1000) - unix;
+  if (secs < 60) return secs + 's ago';
+  if (secs < 3600) return Math.floor(secs / 60) + 'm ago';
+  if (secs < 86400) return Math.floor(secs / 3600) + 'h ago';
+  return Math.floor(secs / 86400) + 'd ago';
+}
+
+function fmtDate(unix) {
+  if (!unix) return '?';
+  return new Date(unix * 1000).toLocaleString();
+}
+
+function truncId(id, n) {
+  if (!id) return '?';
+  n = n || 16;
+  return id.length > n ? id.slice(0, n) + '...' : id;
+}
+
+function copyText(t) {
+  navigator.clipboard.writeText(t).then(() => {
+    const toast = document.getElementById("toast");
+    toast.style.opacity = "1";
+    setTimeout(() => { toast.style.opacity = "0"; }, 1500);
+  });
+}
+
+function showResult(elId, text, type) {
+  const el = document.getElementById(elId);
+  el.style.display = 'block';
+  el.className = 'res' + (type ? ' ' + type : '');
+  el.textContent = text;
+}
+
+// ── Tab Switching ────────────────────────────────────────────
+document.querySelectorAll("#main-tabs .tab").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll("#main-tabs .tab").forEach(t => t.classList.remove("on"));
+    document.querySelectorAll(".sec").forEach(s => s.classList.remove("on"));
+    btn.classList.add("on");
+    document.getElementById("sec-" + btn.dataset.tab).classList.add("on");
+    if (btn.dataset.tab === 'ov') { loadOverview(); startAuto(loadOverview); }
+    else stopAuto();
+  });
+});
+
+// ── Stats Bar ────────────────────────────────────────────────
+async function loadStats() {
+  try {
+    const d = await adminApi("/overview");
+    const statsEl = document.getElementById("stats");
+    const outstanding = (d.total_issued_sats || 0) - (d.total_redeemed_sats || 0);
+    statsEl.innerHTML =
+      box(d.tokens_issued || 0, "Tokens Issued") +
+      box(d.spent_count || 0, "Tokens Spent") +
+      box((d.total_issued_sats || 0).toLocaleString(), "Issued (sats)") +
+      box((d.total_redeemed_sats || 0).toLocaleString(), "Redeemed (sats)") +
+      box(outstanding.toLocaleString(), "Outstanding (sats)") +
+      box(d.ln_backend?.configured ? d.ln_backend.type : "none", "LN Backend") +
+      box(d.pending_requests || 0, "Pending Requests");
+
+    document.getElementById("sta").textContent = "Online";
+    document.getElementById("sta").style.color = "#34d399";
+  } catch(e) {
+    document.getElementById("sta").textContent = "Error: " + e.message;
+    document.getElementById("sta").style.color = "#fca5a5";
+  }
+}
+
+// ── Auto-refresh (shared) ────────────────────────────────────
+let _ar = null, _arAt = 0;
+function startAuto(loader, sec) {
+  stopAuto();
+  if (!document.getElementById('autorefresh')?.checked) return;
+  _ar = setInterval(() => loader(true), (sec || 10) * 1000);
+}
+function stopAuto() { if (_ar) { clearInterval(_ar); _ar = null; } }
+function stampUpdated() {
+  _arAt = Date.now();
+  const el = document.getElementById('updated'); if (el) el.textContent = 'updated just now';
+}
+setInterval(() => {
+  const el = document.getElementById('updated');
+  if (el && _arAt) { const s = Math.round((Date.now() - _arAt) / 1000); el.textContent = `updated ${s}s ago`; }
+}, 1000);
+
+// ── Overview Tab ─────────────────────────────────────────────
+async function loadOverview(silent) {
+  try {
+    const d = await adminApi("/overview");
+
+    // Outstanding liability (issued − redeemed)
+    const issued = d.total_issued_sats || 0;
+    const redeemed = d.total_redeemed_sats || 0;
+    const outstanding = issued - redeemed;
+    document.getElementById("ov-liability").innerHTML = `
+      <div style="display:flex;gap:32px;flex-wrap:wrap;align-items:flex-end">
+        <div>
+          <div class="num">${outstanding.toLocaleString()}</div>
+          <div class="lbl">Outstanding (sats)</div>
+        </div>
+        <div>
+          <div class="num sm" style="font-size:1.1rem">${issued.toLocaleString()}</div>
+          <div class="lbl">Issued (sats)</div>
+        </div>
+        <div>
+          <div class="num sm" style="font-size:1.1rem">${redeemed.toLocaleString()}</div>
+          <div class="lbl">Redeemed (sats)</div>
+        </div>
+      </div>
+      <div class="hint" style="margin-top:8px">Outstanding = issued − redeemed. This is the mint's live token liability.</div>
+    `;
+
+    // Mint quotes summary
+    const mq = d.mint_quotes || {};
+    const mqTotal = (mq.unpaid||0) + (mq.paid||0) + (mq.issued||0) + (mq.pending||0);
+    document.getElementById("ov-mint-quotes").innerHTML = `
+      <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:8px">
+        <div>${badge("UNPAID", "unpaid")} <strong>${mq.unpaid||0}</strong></div>
+        <div>${badge("PAID", "paid")} <strong>${mq.paid||0}</strong></div>
+        <div>${badge("ISSUED", "issued")} <strong>${mq.issued||0}</strong></div>
+        <div>${badge("PENDING", "pending")} <strong>${mq.pending||0}</strong></div>
+      </div>
+      <div class="muted" style="font-size:.78rem">Total: ${mqTotal} quotes</div>
+    `;
+
+    // Melt quotes summary
+    const lq = d.melt_quotes || {};
+    const lqTotal = (lq.unpaid||0) + (lq.paid||0) + (lq.pending||0);
+    document.getElementById("ov-melt-quotes").innerHTML = `
+      <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:8px">
+        <div>${badge("UNPAID", "unpaid")} <strong>${lq.unpaid||0}</strong></div>
+        <div>${badge("PAID", "paid")} <strong>${lq.paid||0}</strong></div>
+        <div>${badge("PENDING", "pending")} <strong>${lq.pending||0}</strong></div>
+      </div>
+      <div class="muted" style="font-size:.78rem">Total: ${lqTotal} quotes</div>
+    `;
+
+    // Active keyset
+    if (d.active_keyset) {
+      const ks = await adminApi("/keysets/" + d.active_keyset);
+      const keys = Object.entries(ks.keys || {}).sort((a,b) => +a[0] - +b[0]);
+      document.getElementById("ov-keyset").innerHTML = `
+        <div style="margin-bottom:12px">
+          ${badge("Active", "active")}
+          <span class="mono accent" style="margin-left:8px;cursor:pointer" onclick="copyText('${ks.id}')" title="Click to copy">${truncId(ks.id, 24)}</span>
+          <span class="muted" style="margin-left:8px">unit: ${ks.unit || 'sat'}</span>
+          <span class="muted" style="margin-left:8px">fee: ${ks.input_fee_ppk || 0} ppk</span>
+          <span class="muted" style="margin-left:8px">created: ${fmtDate(ks.created)}</span>
+        </div>
+        <div class="kgrid">
+          ${keys.map(([a,p]) => `<div class="ki" onclick="copyText('${p}')" title="${p}"><div class="ka">${a}</div><div class="kp">${truncId(p,14)}</div></div>`).join("")}
+        </div>
+        <div class="hint" style="margin-top:8px">Click denomination to copy public key</div>
+      `;
+    } else {
+      document.getElementById("ov-keyset").innerHTML = '<div class="empty">No active keyset</div>';
+    }
+    stampUpdated();
+  } catch(e) {
+    if (!silent) document.getElementById("ov-keyset").innerHTML = `<div class="res err" style="display:block">${e.message}</div>`;
+  }
+}
+window.loadOverview = loadOverview;
+
+async function loadSettings() {
+  try {
+    const d = await adminApi("/settings");
+    document.getElementById("st-fee-pct").value = d.fee_reserve_pct ?? 100;
+    document.getElementById("st-fee-min").value = d.fee_reserve_min ?? 10;
+    document.getElementById("st-ttl").value = d.quote_ttl_secs ?? 3600;
+    document.getElementById('self-enabled').checked = !!d.self_method_enabled;
+  } catch(e) {
+    showResult("st-res", "Error loading settings: " + e.message, "err");
+  }
+}
+
+async function updateSettings() {
+  const pct = parseInt(document.getElementById("st-fee-pct").value);
+  const min = parseInt(document.getElementById("st-fee-min").value);
+  const ttl = parseInt(document.getElementById("st-ttl").value);
+  if (isNaN(pct) || isNaN(min) || isNaN(ttl)) { alert('All fields required'); return; }
+  if (ttl < 60) { alert('TTL must be at least 60 seconds'); return; }
+  const selfOn = document.getElementById('self-enabled').checked;
+  if (selfOn && !confirm('Enable self-mint? Anyone can then mint tokens for free. Testing only.')) return;
+  try {
+    const d = await adminApi("/settings", {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({fee_reserve_pct: pct, fee_reserve_min: min, quote_ttl_secs: ttl, self_method_enabled: selfOn})
+    });
+    const pctDisplay = (d.fee_reserve_pct / 100).toFixed(2);
+    const ttlDisplay = d.quote_ttl_secs >= 3600 ? (d.quote_ttl_secs / 3600) + 'h' : (d.quote_ttl_secs / 60) + 'm';
+    showResult("st-res", "Saved: fee " + pctDisplay + "% (min " + d.fee_reserve_min + " sats), TTL " + ttlDisplay, "ok");
+  } catch(e) {
+    showResult("st-res", "Error: " + e.message, "err");
+  }
+}
+window.updateSettings = updateSettings;
+
+// ── Keysets Tab ──────────────────────────────────────────────
+async function loadKeysets() {
+  try {
+    const d = await adminApi("/keysets");
+    const keysets = d.keysets || [];
+    if (!keysets.length) {
+      document.getElementById("ks-body").innerHTML = '<div class="empty">No keysets found</div>';
+      return;
+    }
+    document.getElementById("ks-body").innerHTML = `
+      <table class="tbl">
+        <thead><tr>
+          <th>ID</th><th>Unit</th><th>Status</th><th>Keys</th><th>Fee (ppk)</th><th>Created</th><th>Actions</th>
+        </tr></thead>
+        <tbody>
+          ${keysets.map(k => `<tr>
+            <td class="mono accent">${truncId(k.id, 20)}</td>
+            <td>${k.unit || 'sat'}</td>
+            <td>${k.active ? badge('Active', 'active') : badge('Inactive', 'inactive')}</td>
+            <td>${k.key_count || k.denominations?.length || '?'}</td>
+            <td>${k.input_fee_ppk || 0}</td>
+            <td class="muted">${fmtDate(k.created)}</td>
+            <td style="white-space:nowrap">
+              <button class="rbtn" onclick="viewKeyset('${k.id}')">View</button>
+              ${k.active
+                ? ''
+                : `<button class="rbtn" style="color:#34d399;border-color:#065f46" onclick="activateKeyset('${k.id}')">Activate</button>`}
+            </td>
+          </tr>`).join("")}
+        </tbody>
+      </table>
+    `;
+  } catch(e) {
+    document.getElementById("ks-body").innerHTML = `<div class="res err" style="display:block">${e.message}</div>`;
+  }
+}
+window.loadKeysets = loadKeysets;
+
+async function generateKeyset() {
+  if (!confirm('Generate a new keyset with random keys? It will be created as inactive.')) return;
+  try {
+    const d = await adminApi("/keysets/generate", {method: 'POST'});
+    showResult("ks-action-res", "Keyset generated: " + d.id + " (" + d.key_count + " keys, inactive)", "ok");
+    await loadKeysets();
+    await loadStats();
+  } catch(e) {
+    showResult("ks-action-res", "Error: " + e.message, "err");
+  }
+}
+window.generateKeyset = generateKeyset;
+
+async function activateKeyset(id) {
+  if (!confirm('Activate this keyset? The current active keyset will be deactivated.\n\nID: ' + id)) return;
+  try {
+    await adminApi("/keysets/activate", {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({id})
+    });
+    showResult("ks-action-res", "Keyset activated: " + truncId(id, 24), "ok");
+    await loadKeysets();
+    await loadStats();
+  } catch(e) {
+    showResult("ks-action-res", "Error: " + e.message, "err");
+  }
+}
+window.activateKeyset = activateKeyset;
+
+async function setKeysetFee(id, currentFee) {
+  const input = prompt('Set input fee (parts per thousand) for keyset:\n' + id + '\n\nCurrent fee: ' + currentFee + ' ppk', currentFee);
+  if (input === null) return;
+  const fee = parseInt(input);
+  if (isNaN(fee) || fee < 0) { alert('Invalid fee value'); return; }
+  try {
+    const d = await adminApi("/keysets/set-fee", {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({id, input_fee_ppk: fee})
+    });
+    alert('Fee updated. Keyset ID changed:\n\nOld: ' + d.old_id + '\nNew: ' + d.new_id + '\nFee: ' + d.input_fee_ppk + ' ppk');
+    viewKeyset(d.new_id);
+    await loadStats();
+  } catch(e) {
+    alert('Error setting fee: ' + e.message);
+  }
+}
+window.setKeysetFee = setKeysetFee;
+
+async function viewKeyset(id) {
+  document.getElementById("ks-list-view").style.display = "none";
+  document.getElementById("ks-detail-view").style.display = "block";
+  document.getElementById("ks-detail").innerHTML = '<em class="muted">Loading...</em>';
+  try {
+    const ks = await adminApi("/keysets/" + id);
+    const keys = Object.entries(ks.keys || {}).sort((a,b) => +a[0] - +b[0]);
+    document.getElementById("ks-detail").innerHTML = `
+      <div style="margin-bottom:16px">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap">
+          ${ks.active ? badge('Active', 'active') : badge('Inactive', 'inactive')}
+          <span class="mono muted" style="font-size:.75rem;cursor:pointer" onclick="copyText('${ks.id}')" title="Click to copy full ID">${ks.id}</span>
+        </div>
+        <div class="muted" style="font-size:.82rem;margin-bottom:12px">
+          Unit: ${ks.unit || 'sat'} &middot; Fee: ${ks.input_fee_ppk || 0} ppk &middot; Created: ${fmtDate(ks.created)}
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          ${ks.active
+            ? ''
+            : `<button class="btn btn-sm" style="background:#065f46;color:#34d399" onclick="activateKeyset('${ks.id}')">Activate</button>`}
+          <button class="btn btn-sm btn-sec" onclick="setKeysetFee('${ks.id}', ${ks.input_fee_ppk || 0})">Set Fee</button>
+        </div>
+      </div>
+      <div style="margin-bottom:8px;font-weight:600;font-size:.85rem">Public Keys (${keys.length} denominations)</div>
+      <table class="tbl">
+        <thead><tr><th>Amount (sats)</th><th>Public Key</th><th></th></tr></thead>
+        <tbody>
+          ${keys.map(([a,p]) => `<tr>
+            <td><strong class="accent">${a}</strong></td>
+            <td class="mono" style="font-size:.72rem">${p}</td>
+            <td><button class="rbtn" onclick="copyText('${p}')">Copy</button></td>
+          </tr>`).join("")}
+        </tbody>
+      </table>
+    `;
+  } catch(e) {
+    document.getElementById("ks-detail").innerHTML = `<div class="res err" style="display:block">${e.message}</div>`;
+  }
+}
+window.viewKeyset = viewKeyset;
+
+function showKeysetList() {
+  document.getElementById("ks-list-view").style.display = "block";
+  document.getElementById("ks-detail-view").style.display = "none";
+}
+window.showKeysetList = showKeysetList;
+
+// ── Quotes Tab ──────────────────────────────────────────────
+let currentFilter = 'all';
+
+async function loadQuotes() {
+  try {
+    const d = await adminApi("/quotes");
+    allQuotes = [];
+    (d.mint_quotes || []).forEach(q => allQuotes.push({...q, _type: 'mint'}));
+    (d.melt_quotes || []).forEach(q => allQuotes.push({...q, _type: 'melt'}));
+    allQuotes.sort((a,b) => (b.created||0) - (a.created||0));
+    renderQuotes();
+  } catch(e) {
+    document.getElementById("qt-body").innerHTML = `<div class="res err" style="display:block">${e.message}</div>`;
+  }
+}
+window.loadQuotes = loadQuotes;
+
+function renderQuotes() {
+  let filtered = allQuotes;
+  if (currentFilter === 'mint') filtered = allQuotes.filter(q => q._type === 'mint');
+  else if (currentFilter === 'melt') filtered = allQuotes.filter(q => q._type === 'melt');
+  else if (['UNPAID','PAID','ISSUED'].includes(currentFilter))
+    filtered = allQuotes.filter(q => q.state === currentFilter);
+
+  if (!filtered.length) {
+    document.getElementById("qt-body").innerHTML = '<div class="empty">No quotes match filter</div>';
+    return;
+  }
+
+  document.getElementById("qt-body").innerHTML = `
+    <table class="tbl">
+      <thead><tr>
+        <th>Type</th><th>Quote ID</th><th>Amount</th><th>State</th><th>Method</th><th>Created</th><th>Expired</th><th></th>
+      </tr></thead>
+      <tbody>
+        ${filtered.map(q => {
+          const stClass = q.state === 'PAID' ? 'paid' : q.state === 'ISSUED' ? 'issued' : q.state === 'PENDING' ? 'pending' : 'unpaid';
+          const canDelete = !(q._type === 'mint' && q.state === 'ISSUED') && !(q._type === 'melt' && q.state === 'PAID');
+          return `<tr>
+            <td>${badge(q._type, q._type === 'mint' ? 'active' : 'pending')}</td>
+            <td class="mono" style="cursor:pointer" onclick="copyText('${q.quote}')" title="${q.quote}">${truncId(q.quote, 16)}</td>
+            <td><strong>${q.amount || '?'}</strong> sats</td>
+            <td>${badge(q.state, stClass)}</td>
+            <td>${q.method || '?'}</td>
+            <td class="muted">${fmtDate(q.created)}</td>
+            <td>${q.expired ? badge('Yes', 'expired') : '<span class="muted">No</span>'}</td>
+            <td>${canDelete ? `<button class="rbtn" style="color:#fca5a5;border-color:#7f1d1d" onclick="deleteQuote('${q.quote}','${q._type}')">Delete</button>` : ''}</td>
+          </tr>`;
+        }).join("")}
+      </tbody>
+    </table>
+    <div class="hint" style="margin-top:8px">Showing ${filtered.length} of ${allQuotes.length} quotes. Click quote ID to copy.</div>
+  `;
+}
+
+async function deleteQuote(quoteId, type) {
+  if (!confirm('Delete this ' + type + ' quote?\n\nID: ' + quoteId)) return;
+  try {
+    await adminApi("/quotes/delete", {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({quote_id: quoteId, type})
+    });
+    await loadQuotes();
+    await loadStats();
+  } catch(e) {
+    alert('Error deleting quote: ' + e.message);
+  }
+}
+window.deleteQuote = deleteQuote;
+
+document.getElementById("qt-filter").addEventListener("click", e => {
+  if (!e.target.dataset.f) return;
+  currentFilter = e.target.dataset.f;
+  document.querySelectorAll("#qt-filter button").forEach(b => b.classList.remove("on"));
+  e.target.classList.add("on");
+  renderQuotes();
+});
+
+// ── Tokens Tab ──────────────────────────────────────────────
+async function loadSpent() {
+  try {
+    const d = await adminApi("/spent");
+    document.getElementById("tk-spent").innerHTML = `
+      <div style="display:flex;gap:24px;margin-bottom:8px">
+        <div><span class="muted">Spent secrets:</span> <strong class="accent">${d.spent_count || 0}</strong></div>
+        <div><span class="muted">Spent Y-points:</span> <strong class="accent">${d.spent_ys_count || 0}</strong></div>
+      </div>
+      <div class="hint">These counts should match. Spent secrets are checked during swap to prevent double-spending.</div>
+    `;
+  } catch(e) {
+    document.getElementById("tk-spent").innerHTML = `<div class="res err" style="display:block">${e.message}</div>`;
+  }
+}
+window.loadSpent = loadSpent;
+
+async function checkSpent() {
+  const input = document.getElementById("tk-check-input").value.trim();
+  if (!input) return;
+  try {
+    const d = await adminApi("/spent/check", {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({secret: input})
+    });
+    if (d.spent) {
+      showResult("tk-check-res", "SPENT - This token has been redeemed and cannot be used again.", "err");
+    } else {
+      showResult("tk-check-res", "UNSPENT - This token has not been seen by the mint (or is not tracked).", "ok");
+    }
+  } catch(e) {
+    showResult("tk-check-res", "Error: " + e.message, "err");
+  }
+}
+window.checkSpent = checkSpent;
+
+// ── Lightning Tab ───────────────────────────────────────────
+async function loadLightning() {
+  try {
+    const d = await adminApi("/lightning");
+    if (d.type === 'none') {
+      document.getElementById("ln-body").innerHTML = `
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+          <span class="dot dot-warn"></span>
+          <strong>No Lightning backend configured</strong>
+        </div>
+        <div class="muted" style="font-size:.85rem">
+          Use the form on the right to configure a Lightning backend for bolt11 minting/melting (NUT-04/05).
+        </div>
+      `;
+    } else {
+      document.getElementById("ln-body").innerHTML = `
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
+          <span class="dot dot-ok"></span>
+          <strong>Lightning backend active</strong>
+        </div>
+        <table class="tbl">
+          <tbody>
+            <tr><td class="muted" style="width:120px">Type</td><td><strong>${esc(d.type)}</strong></td></tr>
+            <tr><td class="muted">URL</td><td class="mono">${esc(d.url || 'N/A')}</td></tr>
+            <tr><td class="muted">API Key</td><td>${d.api_key_set ? badge('Configured', 'active') : badge('Not set', 'inactive')}</td></tr>
+          </tbody>
+        </table>
+        <div style="margin-top:12px">
+          <button class="btn btn-sm btn-danger" onclick="clearLn()">Remove Backend</button>
+        </div>
+      `;
+      // Pre-fill form with current values
+      document.getElementById("ln-type").value = d.type;
+      document.getElementById("ln-url").value = d.url || '';
+      toggleLnFields();
+    }
+  } catch(e) {
+    document.getElementById("ln-body").innerHTML = `<div class="res err" style="display:block">${e.message}</div>`;
+  }
+}
+window.loadLightning = loadLightning;
+
+function toggleLnFields() {
+  const type = document.getElementById("ln-type").value;
+  const fields = document.getElementById("ln-fields");
+  const apikeyField = document.getElementById("ln-apikey-field");
+  const macaroonField = document.getElementById("ln-macaroon-field");
+  if (type === 'none') {
+    fields.style.display = 'none';
+  } else {
+    fields.style.display = 'block';
+    apikeyField.style.display = type === 'lnbits' ? 'flex' : 'none';
+    macaroonField.style.display = type === 'lnd' ? 'flex' : 'none';
+  }
+}
+window.toggleLnFields = toggleLnFields;
+
+async function configureLn() {
+  const type = document.getElementById("ln-type").value;
+  let body;
+  if (type === 'none') {
+    if (!confirm('Remove Lightning backend configuration?')) return;
+    body = {type: 'none'};
+  } else if (type === 'lnbits') {
+    const url = document.getElementById("ln-url").value.trim();
+    const apiKey = document.getElementById("ln-apikey").value.trim();
+    if (!url || !apiKey) { alert('URL and API Key are required'); return; }
+    body = {type: 'lnbits', url, api_key: apiKey};
+  } else if (type === 'lnd') {
+    const url = document.getElementById("ln-url").value.trim();
+    const macaroon = document.getElementById("ln-macaroon").value.trim();
+    if (!url || !macaroon) { alert('URL and Macaroon are required'); return; }
+    body = {type: 'lnd', url, macaroon};
+  }
+  try {
+    const d = await adminApi("/lightning/configure", {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+    });
+    showResult("ln-config-res", "Configured: " + d.type + (d.url ? " at " + d.url : ""), "ok");
+    await loadLightning();
+    await loadStats();
+  } catch(e) {
+    showResult("ln-config-res", "Error: " + e.message, "err");
+  }
+}
+window.configureLn = configureLn;
+
+async function clearLn() {
+  if (!confirm('Remove Lightning backend? bolt11 minting/melting will be disabled.')) return;
+  try {
+    await adminApi("/lightning/configure", {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({type: 'none'})
+    });
+    showResult("ln-config-res", "Lightning backend removed", "ok");
+    await loadLightning();
+    await loadStats();
+  } catch(e) {
+    showResult("ln-config-res", "Error: " + e.message, "err");
+  }
+}
+window.clearLn = clearLn;
+
+async function testLn() {
+  try {
+    const d = await adminApi("/lightning/test", {method: 'POST'});
+    showResult("ln-config-res", d.status + ": " + d.message, "ok");
+  } catch(e) {
+    showResult("ln-config-res", "Error: " + e.message, "err");
+  }
+}
+window.testLn = testLn;
+
+// ── Info Tab ────────────────────────────────────────────────
+async function loadInfo() {
+  try {
+    const d = await adminApi("/info");
+    const nuts = d.nuts || {};
+    document.getElementById("nf-body").innerHTML = `
+      <table class="tbl" style="margin-bottom:16px">
+        <tbody>
+          <tr><td class="muted" style="width:140px">Name</td><td><strong>${esc(d.name || 'Unnamed')}</strong></td></tr>
+          <tr><td class="muted">Version</td><td class="mono">${esc(d.version || '?')}</td></tr>
+          <tr><td class="muted">Description</td><td>${esc(d.description || 'N/A')}</td></tr>
+          <tr><td class="muted">Description (long)</td><td>${esc(d.description_long || 'N/A')}</td></tr>
+          <tr><td class="muted">Contact</td><td>${esc((d.contact || []).map(c => c.join(': ')).join(', ') || 'N/A')}</td></tr>
+          <tr><td class="muted">MOTD</td><td>${esc(d.motd || 'N/A')}</td></tr>
+        </tbody>
+      </table>
+      <div style="font-weight:600;font-size:.85rem;margin-bottom:8px">Supported NUTs</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${Object.keys(nuts).sort((a,b) => +a - +b).map(n => {
+          const nut = nuts[n];
+          const methods = nut.methods ? nut.methods.map(m => m.method + '/' + m.unit).join(', ') : '';
+          const supported = nut.supported !== undefined ? (nut.supported ? 'Yes' : 'No') : '';
+          const detail = methods || supported || (nut.disabled ? 'disabled' : 'supported');
+          return `<div class="ki" style="min-width:80px;cursor:default" title="NUT-${esc(n)}: ${esc(detail)}">
+            <div class="ka">NUT-${esc(n)}</div>
+            <div class="kp">${esc(detail)}</div>
+          </div>`;
+        }).join("")}
+      </div>
+      <div class="hint" style="margin-top:12px">
+        This is the public <code class="mono">/v1/info</code> response visible to all wallets.
+      </div>
+    `;
+    // Pre-fill edit form
+    document.getElementById("nf-name").value = d.name || '';
+    document.getElementById("nf-desc").value = d.description || '';
+  } catch(e) {
+    document.getElementById("nf-body").innerHTML = `<div class="res err" style="display:block">${e.message}</div>`;
+  }
+}
+window.loadInfo = loadInfo;
+
+async function updateInfo() {
+  const name = document.getElementById("nf-name").value.trim();
+  const description = document.getElementById("nf-desc").value.trim();
+  if (!name && !description) { alert('Enter a name or description'); return; }
+  try {
+    const body = {};
+    if (name) body.name = name;
+    if (description) body.description = description;
+    const d = await adminApi("/info/update", {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+    });
+    showResult("nf-res", "Updated: " + d.name + " - " + d.description, "ok");
+    await loadInfo();
+  } catch(e) {
+    showResult("nf-res", "Error: " + e.message, "err");
+  }
+}
+window.updateInfo = updateInfo;
+
+// ── Utilities ───────────────────────────────────────────────
+window.copyText = copyText;
+
+// ── Init ────────────────────────────────────────────────────
+document.getElementById("autorefresh").addEventListener("change", e => {
+  if (e.target.checked) startAuto(loadOverview); else stopAuto();
+});
+
+async function init() {
+  await Promise.all([loadStats(), loadOverview(), loadSettings()]);
+  startAuto(loadOverview);
+}
+
+// Lazy-load tabs on first visit
+const loaded = {ov: true, ks: false, qt: false, tk: false, ln: false, nf: false};
+document.querySelectorAll("#main-tabs .tab").forEach(btn => {
+  btn.addEventListener("click", async () => {
+    const t = btn.dataset.tab;
+    if (loaded[t]) return;
+    loaded[t] = true;
+    if (t === 'ks') await loadKeysets();
+    if (t === 'qt') await loadQuotes();
+    if (t === 'tk') await loadSpent();
+    if (t === 'ln') await loadLightning();
+    if (t === 'nf') await loadInfo();
+  });
+});
+
+init();
+</script>
+</body>
+</html>

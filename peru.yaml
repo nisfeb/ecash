@@ -1,0 +1,22 @@
+imports:
+  base-dev: ./dist
+
+git module base-dev:
+  url:    https://github.com/urbit/urbit
+  reup:   master
+  export: pkg/base-dev
+  pick:
+    - pkg/base-dev/lib/dbug.hoon
+    - pkg/base-dev/lib/default-agent.hoon
+    - pkg/base-dev/lib/skeleton.hoon
+    - pkg/base-dev/lib/test.hoon
+    - pkg/base-dev/lib/verb.hoon
+    - pkg/base-dev/mar/bill.hoon
+    - pkg/base-dev/mar/kelvin.hoon
+    - pkg/base-dev/mar/noun.hoon
+    - pkg/base-dev/mar/mime.hoon
+    - pkg/base-dev/mar/hoon.hoon
+    - pkg/base-dev/mar/json.hoon
+    - pkg/base-dev/mar/txt.hoon
+    - pkg/base-dev/sur/verb.hoon
+  rev: 41dd3b5f7c554ac615d0db9eaa5fe46071d47bc8

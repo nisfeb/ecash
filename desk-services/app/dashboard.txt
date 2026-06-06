@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>ecash-services admin</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0b1413;color:#e2e8f0;min-height:100vh}
+.hdr{background:#0d1f1d;border-bottom:1px solid #134e4a;padding:14px 24px;display:flex;align-items:center;gap:12px}
+.hdr h1{font-size:1.15rem;font-weight:700;color:#f8fafc}
+.ver{font-size:.65rem;background:#14b8a6;color:#0f1a18;padding:2px 8px;border-radius:12px;font-weight:700}
+.sta{margin-left:auto;font-size:.8rem;color:#64748b}
+.wrap{max-width:1200px;margin:0 auto;padding:20px 24px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:20px}
+.box{background:#0d1f1d;border:1px solid #134e4a;border-radius:10px;padding:16px}
+.num{font-size:1.8rem;font-weight:700;color:#14b8a6}
+.num.sm{font-size:.9rem;word-break:break-all}
+.lbl{color:#94a3b8;font-size:.8rem;margin-top:4px}
+.card{background:#0d1f1d;border:1px solid #134e4a;border-radius:10px;margin-bottom:16px}
+.ch{padding:14px 18px;border-bottom:1px solid #134e4a;display:flex;align-items:center;justify-content:space-between;font-weight:600;font-size:.95rem;gap:12px;flex-wrap:wrap}
+.cb{padding:18px}
+.tabs{display:flex;gap:2px;background:#0b1413;padding:3px;border-radius:8px;margin-bottom:20px;width:fit-content;border:1px solid #134e4a;flex-wrap:wrap}
+.tab{padding:7px 14px;border-radius:6px;cursor:pointer;font-size:.82rem;font-weight:500;color:#94a3b8;border:none;background:transparent;transition:all .15s}
+.tab.on{background:#14b8a6;color:#0f1a18;font-weight:700}
+.tab:hover:not(.on){color:#14b8a6}
+.sec{display:none}.sec.on{display:block}
+.tbl{width:100%;border-collapse:collapse}
+.tbl th{text-align:left;padding:10px 12px;background:#0b1413;color:#94a3b8;font-size:.78rem;text-transform:uppercase;letter-spacing:.5px;font-weight:600}
+.tbl td{padding:10px 12px;border-top:1px solid #0f1f1d;font-size:.85rem}
+.tbl tr:hover td{background:#0f1f1d}
+.badge{display:inline-block;padding:2px 10px;border-radius:12px;font-size:.72rem;font-weight:600}
+.b-active{background:#042f2e;color:#5eead4}
+.b-inactive{background:#1f2937;color:#9ca3af}
+.b-locked{background:#1e1b4b;color:#a78bfa}
+.b-public{background:#1f2937;color:#9ca3af}
+.b-expired{background:#1f2937;color:#9ca3af}
+.mono{font-family:'SF Mono',Consolas,monospace;font-size:.8rem}
+.muted{color:#64748b}
+.accent{color:#14b8a6}
+.btn{padding:8px 16px;background:#14b8a6;color:#0f1a18;border:none;border-radius:8px;cursor:pointer;font-size:.82rem;font-weight:700;transition:all .15s;white-space:nowrap}
+.btn:hover{background:#0d9488}
+.btn:disabled{background:#134e4a;color:#64748b;cursor:not-allowed}
+.btn-sm{padding:5px 10px;font-size:.75rem;border-radius:6px}
+.btn-sec{background:#0a1514;color:#14b8a6;border:1px solid rgba(20,184,166,0.3)}
+.btn-sec:hover:not(:disabled){background:#0f2624}
+.btn-danger{background:#7f1d1d;color:#fca5a5}
+.btn-danger:hover{background:#991b1b}
+.rbtn{background:transparent;border:1px solid #134e4a;color:#94a3b8;padding:5px 10px;border-radius:6px;cursor:pointer;font-size:.78rem}
+.rbtn:hover{border-color:#14b8a6;color:#14b8a6}
+.fld{display:flex;flex-direction:column;gap:4px;margin-bottom:12px}
+.fld label{font-size:.8rem;color:#94a3b8}
+.fld input,.fld select,.fld textarea{width:100%;background:#0b1413;border:1px solid #134e4a;color:#e2e8f0;padding:8px 12px;border-radius:8px;font-size:.85rem;font-family:'SF Mono',Consolas,monospace}
+.fld textarea{min-height:60px;resize:vertical}
+.frow{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap}
+.frow .fld{flex:1;margin-bottom:0;min-width:140px}
+.hint{font-size:.72rem;color:#64748b;margin-top:4px}
+.toast{position:fixed;bottom:20px;right:20px;background:#14b8a6;color:#0f1a18;padding:10px 20px;border-radius:8px;font-weight:700;font-size:.85rem;opacity:0;transition:opacity .3s;pointer-events:none;z-index:999;max-width:60vw}
+.empty{padding:32px;text-align:center;color:#64748b;font-size:.85rem}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:768px){.split{grid-template-columns:1fr}.grid{grid-template-columns:repeat(2,1fr)}}
+.gauge{height:6px;background:#0f1f1d;border-radius:3px;overflow:hidden;margin-top:8px}
+.gauge-fill{height:100%;background:#14b8a6;border-radius:3px;transition:width .3s}
+.svc-card{background:#0a1514;border:1px solid #134e4a;border-radius:10px;padding:14px 16px;margin-bottom:10px}
+.svc-card .svc-name{font-size:.9rem;font-weight:700;color:#14b8a6;margin-bottom:4px}
+.svc-card .svc-title{font-size:.85rem;color:#e2e8f0}
+.svc-card .svc-desc{font-size:.75rem;color:#64748b;margin-top:4px}
+.svc-card .svc-meta{display:flex;gap:14px;margin-top:10px;font-size:.72rem;color:#94a3b8;flex-wrap:wrap}
+.svc-card .svc-meta b{color:#14b8a6}
+.allowlist-box{margin-top:10px;padding:10px;background:#0b1413;border:1px solid #134e4a;border-radius:8px}
+.allowlist-box .hdr-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.allowlist-box .hdr-row span{font-size:.72rem;color:#14b8a6;font-weight:700;text-transform:uppercase;letter-spacing:.5px}
+.allowlist-key{display:flex;justify-content:space-between;align-items:center;padding:5px 8px;margin-top:4px;background:#0a1514;border:1px solid #134e4a;border-radius:6px;font-family:'SF Mono',Consolas,monospace;font-size:.72rem}
+.allowlist-key .val{word-break:break-all;flex:1;color:#5eead4}
+.allowlist-key button{background:transparent;border:none;cursor:pointer;font-size:.72rem;padding:0 4px;margin-left:8px}
+.allowlist-key .k-copy{color:#14b8a6}
+.allowlist-key .k-copy:hover{color:#5eead4}
+.allowlist-key .k-del{color:#fca5a5}
+.allowlist-key .k-del:hover{color:#f87171}
+.allowlist-add{display:flex;gap:6px;margin-top:8px}
+.allowlist-add input{flex:1;background:#0a1514;border:1px solid #134e4a;color:#e2e8f0;padding:6px 10px;border-radius:6px;font-size:.75rem;font-family:'SF Mono',Consolas,monospace}
+</style>
+</head>
+<body>
+<div class="hdr">
+  <span style="font-size:1.4rem">&#x1F511;</span>
+  <h1>Ecash Services</h1>
+  <span class="ver">Admin</span>
+  <span class="sta" id="sta">Loading...</span>
+</div>
+<div class="wrap">
+  <div class="tabs" id="main-tabs">
+    <button class="tab on" data-tab="ov">Overview</button>
+    <button class="tab" data-tab="sv">Services</button>
+    <button class="tab" data-tab="cr">Credentials</button>
+  </div>
+
+  <!-- Overview Tab -->
+  <div id="sec-ov" class="sec on">
+    <div class="card">
+      <div class="ch">
+        <span>Overview</span>
+        <span style="display:flex;align-items:center;gap:12px;font-weight:400;font-size:.8rem">
+          <label style="cursor:pointer"><input type="checkbox" id="autorefresh" checked> auto-refresh</label>
+          <span id="updated" class="muted"></span>
+          <button class="rbtn" onclick="loadOverview()">Refresh</button>
+        </span>
+      </div>
+      <div class="cb">
+        <div class="grid" id="ov-stats"><em class="muted">Loading...</em></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="ch"><span>Per-service issuance</span></div>
+      <div class="cb" id="ov-gauges"><em class="muted">Loading...</em></div>
+    </div>
+  </div>
+
+  <!-- Services Tab -->
+  <div id="sec-sv" class="sec">
+    <div class="card">
+      <div class="ch"><span>Create service</span></div>
+      <div class="cb">
+        <div class="frow">
+          <div class="fld">
+            <label>Name (slug)</label>
+            <input id="svc-name" placeholder="chat">
+            <div class="hint">URL-safe identifier; cannot be changed later</div>
+          </div>
+          <div class="fld">
+            <label>Title</label>
+            <input id="svc-title" placeholder="Chat Access">
+          </div>
+        </div>
+        <div class="fld">
+          <label>Description</label>
+          <input id="svc-desc" placeholder="What this service grants">
+        </div>
+        <div class="frow">
+          <div class="fld">
+            <label>Max issuance (optional)</label>
+            <input id="svc-max" type="number" min="0" placeholder="unlimited">
+          </div>
+          <div class="fld">
+            <label>Expires (unix secs, optional)</label>
+            <input id="svc-expires" type="number" min="0" placeholder="never">
+          </div>
+          <button class="btn" onclick="createService()">Create</button>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="ch">
+        <span>All services</span>
+        <button class="rbtn" onclick="loadServices()">Refresh</button>
+      </div>
+      <div class="cb" id="svc-list"><em class="muted">Loading...</em></div>
+    </div>
+  </div>
+
+  <!-- Credentials Tab -->
+  <div id="sec-cr" class="sec">
+    <div class="card">
+      <div class="ch">
+        <span>Credential keysets</span>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-sm" onclick="genCredKs()">Generate</button>
+          <button class="rbtn" onclick="loadCreds()">Refresh</button>
+        </div>
+      </div>
+      <div class="cb">
+        <div class="grid" id="cr-stats" style="margin-bottom:16px"><em class="muted">Loading...</em></div>
+        <div id="cr-list"><em class="muted">Loading...</em></div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast">Copied!</div>
+
+<script type="module">
+const API = "/apps/ecash-services/admin/api";
+
+// ── Fetch helper: same-origin cookie, JSON parse, surface non-200 detail ──
+async function req(path, opts) {
+  opts = opts || {};
+  const headers = opts.body ? {'Content-Type': 'application/json', ...(opts.headers || {})} : (opts.headers || {});
+  const r = await fetch(API + path, {credentials: 'same-origin', ...opts, headers});
+  let data;
+  try { data = await r.json(); } catch { data = null; }
+  if (!r.ok) {
+    const detail = data && (data.detail || data.error || data.message);
+    throw new Error(detail || ('HTTP ' + r.status));
+  }
+  return data;
+}
+window.req = req;
+
+// ── Misc helpers ─────────────────────────────────────────────
+function toast(msg) {
+  const t = document.getElementById("toast");
+  t.textContent = msg || 'Copied!';
+  t.style.opacity = "1";
+  setTimeout(() => { t.style.opacity = "0"; }, 2200);
+}
+window.toast = toast;
+
+function copyText(t) {
+  navigator.clipboard.writeText(t).then(() => toast('Copied!'));
+}
+window.copyText = copyText;
+
+const esc = (s) => String(s == null ? '' : s)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/'/g, '&#39;').replace(/"/g, '&quot;');
+
+function fmtDate(unix) {
+  if (!unix) return '?';
+  return new Date(unix * 1000).toLocaleString();
+}
+
+function box(val, label) {
+  const isLong = String(val).length > 16;
+  return '<div class="box"><div class="num ' + (isLong ? 'sm' : '') + '">' + val + '</div><div class="lbl">' + label + '</div></div>';
+}
+
+// ── Shared auto-refresh helper ───────────────────────────────
+let _ar = null, _arAt = 0;
+function startAuto(loader, sec) {
+  stopAuto();
+  if (!document.getElementById('autorefresh')?.checked) return;
+  _ar = setInterval(() => loader(true), (sec || 10) * 1000);
+}
+function stopAuto() { if (_ar) { clearInterval(_ar); _ar = null; } }
+function stampUpdated() {
+  _arAt = Date.now();
+  const el = document.getElementById('updated'); if (el) el.textContent = 'updated just now';
+}
+setInterval(() => {
+  const el = document.getElementById('updated');
+  if (el && _arAt) { const s = Math.round((Date.now() - _arAt) / 1000); el.textContent = `updated ${s}s ago`; }
+}, 1000);
+const guard = (msg, fn) => { if (confirm(msg)) fn(); };
+const val = id => document.getElementById(id)?.value?.trim() || '';
+
+// ── Tab switching ────────────────────────────────────────────
+document.querySelectorAll("#main-tabs .tab").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const t = btn.dataset.tab;
+    document.querySelectorAll("#main-tabs .tab").forEach(x => x.classList.remove("on"));
+    document.querySelectorAll(".sec").forEach(s => s.classList.remove("on"));
+    btn.classList.add("on");
+    document.getElementById("sec-" + t).classList.add("on");
+    if (t === 'ov') { loadOverview(); startAuto(loadOverview); }
+    else { stopAuto(); }
+    if (t === 'sv') loadServices();
+    if (t === 'cr') loadCreds();
+  });
+});
+
+// ── Overview tab (read-only, auto-refresh) ───────────────────
+async function loadOverview(silent) {
+  try {
+    const [cred, svc] = await Promise.all([req('/cred/overview'), req('/services')]);
+    const services = svc.services || [];
+    const activeCount = services.filter(s => s.active).length;
+    const totalIssued = services.reduce((a, s) => a + (s.issued || 0), 0);
+    const totalRedeemed = services.reduce((a, s) => a + (s.redeemed || 0), 0);
+
+    document.getElementById("ov-stats").innerHTML =
+      box(activeCount + ' / ' + services.length, "Services active") +
+      box(cred.cred_keysets || 0, "Cred keysets") +
+      box(cred.cred_issued || 0, "Credentials issued") +
+      box(cred.cred_spent || 0, "Credentials spent") +
+      box(totalIssued, "Total issued") +
+      box(totalRedeemed, "Total redeemed");
+
+    const gEl = document.getElementById("ov-gauges");
+    if (!services.length) {
+      gEl.innerHTML = '<div class="empty">No services yet.</div>';
+    } else {
+      gEl.innerHTML = services.map(s => {
+        let line, gauge = '';
+        if (s.max_issuance != null) {
+          const pct = s.max_issuance > 0 ? Math.min(100, Math.round((s.issued / s.max_issuance) * 100)) : 0;
+          line = '<b>' + s.issued + ' / ' + s.max_issuance + '</b> (' + pct + '%)';
+          gauge = '<div class="gauge"><div class="gauge-fill" style="width:' + pct + '%"></div></div>';
+        } else {
+          line = 'issued <b>' + s.issued + '</b>';
+        }
+        return '<div style="margin-bottom:12px">' +
+          '<div style="display:flex;justify-content:space-between;font-size:.82rem">' +
+            '<span class="accent">' + esc(s.name) + '</span>' +
+            '<span class="muted">' + line + '</span>' +
+          '</div>' + gauge +
+        '</div>';
+      }).join('');
+    }
+    stampUpdated();
+  } catch(e) {
+    if (!silent) toast(e.message);
+  }
+}
+window.loadOverview = loadOverview;
+
+document.getElementById("autorefresh").addEventListener("change", e => {
+  if (e.target.checked) startAuto(loadOverview); else stopAuto();
+});
+
+// ── Services tab (CRUD + allowlist) ──────────────────────────
+async function loadServices() {
+  try {
+    const d = await req('/services');
+    const services = d.services || [];
+    const listEl = document.getElementById("svc-list");
+    if (!services.length) {
+      listEl.innerHTML = '<div class="empty">No services yet. Use the form above to create one.</div>';
+      return;
+    }
+    const nowSec = Math.floor(Date.now() / 1000);
+    listEl.innerHTML = services.map(s => {
+      const isExpired = s.expires && s.expires < nowSec;
+      const keys = Array.isArray(s.allowlist) ? s.allowlist : [];
+      const locked = s.allowlist_required || keys.length > 0;
+
+      const badges = [];
+      badges.push(s.active
+        ? '<span class="badge b-active">active</span>'
+        : '<span class="badge b-inactive">inactive</span>');
+      if (isExpired) badges.push('<span class="badge b-expired">expired</span>');
+      const keyCount = s.allowlist_count != null ? s.allowlist_count : keys.length;
+      badges.push(locked
+        ? '<span class="badge b-locked">&#x1F510; ' + keyCount + ' key' + (keyCount === 1 ? '' : 's') + '</span>'
+        : '<span class="badge b-public">public</span>');
+
+      const expText = s.expires
+        ? (isExpired ? 'expired ' : 'expires ') + fmtDate(s.expires)
+        : 'no expiry';
+
+      let capLine, gauge = '';
+      if (s.max_issuance != null) {
+        const pct = s.max_issuance > 0 ? Math.min(100, Math.round((s.issued / s.max_issuance) * 100)) : 0;
+        capLine = '<span>Issued: <b>' + s.issued + ' / ' + s.max_issuance + '</b> (' + pct + '%)</span>';
+        gauge = '<div class="gauge"><div class="gauge-fill" style="width:' + pct + '%"></div></div>';
+      } else {
+        capLine = '<span>Issued: <b>' + s.issued + '</b></span>';
+      }
+
+      const nm = esc(s.name);
+      const actions = (s.active
+        ? '<button class="rbtn js-svc-deact" data-name="' + nm + '">Deactivate</button>'
+        : '<button class="rbtn js-svc-act" data-name="' + nm + '">Activate</button>' +
+          ' <button class="rbtn js-svc-del" data-name="' + nm + '">Delete</button>') +
+        ' <button class="rbtn js-svc-edit" data-name="' + nm + '">Edit</button>';
+
+      const keyRows = keys.map(k =>
+        '<div class="allowlist-key">' +
+          '<span class="val">' + esc(k) + '</span>' +
+          '<button class="k-copy js-key-copy" title="Copy" data-key="' + esc(k) + '">copy</button>' +
+          '<button class="k-del js-key-remove" title="Revoke" data-name="' + nm + '" data-key="' + esc(k) + '">&times;</button>' +
+        '</div>'
+      ).join('');
+
+      const allowlistBox =
+        '<div class="allowlist-box">' +
+          '<div class="hdr-row">' +
+            '<span>Access keys ' + (locked ? '(gated)' : '(empty &rarr; public)') + '</span>' +
+          '</div>' +
+          keyRows +
+          '<div class="allowlist-add">' +
+            '<input class="al-input" placeholder="new access key" />' +
+            '<button class="rbtn js-key-add" data-name="' + nm + '">Add</button>' +
+          '</div>' +
+        '</div>';
+
+      const editBox =
+        '<div class="svc-edit" style="display:none;margin-top:10px;padding:10px;background:#0b1413;border:1px solid #134e4a;border-radius:8px">' +
+          '<div class="frow">' +
+            '<div class="fld"><label>Title</label><input class="ed-title" placeholder="title" value="' + esc(s.title == null ? '' : s.title) + '"></div>' +
+            '<div class="fld"><label>Description</label><input class="ed-desc" placeholder="description" value="' + esc(s.description == null ? '' : s.description) + '"></div>' +
+          '</div>' +
+          '<div class="frow">' +
+            '<div class="fld"><label>Max issuance</label><input class="ed-max" type="number" min="0" placeholder="unlimited" value="' + (s.max_issuance != null ? s.max_issuance : '') + '"></div>' +
+            '<div class="fld"><label>Expires (unix secs)</label><input class="ed-expires" type="number" min="0" placeholder="never" value="' + (s.expires != null ? s.expires : '') + '"></div>' +
+            '<button class="btn btn-sm js-svc-save" data-name="' + nm + '">Save</button>' +
+          '</div>' +
+        '</div>';
+
+      return '<div class="svc-card">' +
+        '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">' +
+          '<div>' +
+            '<div class="svc-name">' + nm + ' ' + badges.join(' ') + '</div>' +
+            '<div class="svc-title">' + esc(s.title) + '</div>' +
+            '<div class="svc-desc">' + esc(s.description) + '</div>' +
+          '</div>' +
+          '<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">' + actions + '</div>' +
+        '</div>' +
+        '<div class="svc-meta">' +
+          capLine +
+          '<span>Redeemed: <b>' + s.redeemed + '</b></span>' +
+          '<span>Kind: <b>' + esc(s.kind) + '</b></span>' +
+          '<span>' + expText + '</span>' +
+        '</div>' +
+        gauge +
+        editBox +
+        allowlistBox +
+      '</div>';
+    }).join('');
+    attachSvcDelegation();
+  } catch(e) {
+    const listEl = document.getElementById("svc-list");
+    if (listEl) listEl.innerHTML = '<div class="empty">Error: ' + esc(e.message) + '</div>';
+  }
+}
+window.loadServices = loadServices;
+
+const createService = () => req('/services/create', {method:'POST', body: JSON.stringify({
+  name: val('svc-name'), title: val('svc-title'), description: val('svc-desc'),
+  ...(val('svc-expires') ? {expires: Number(val('svc-expires'))} : {}),
+  ...(val('svc-max') ? {max_issuance: Number(val('svc-max'))} : {}),
+})}).then(() => {
+  ['svc-name','svc-title','svc-desc','svc-expires','svc-max'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  loadServices();
+}).catch(e=>toast(e.message));
+window.createService = createService;
+
+const activateService   = name => req('/services/activate',   {method:'POST', body: JSON.stringify({name})}).then(loadServices).catch(e=>toast(e.message));
+const deactivateService = name => guard(`Deactivate "${name}"?`, () => req('/services/deactivate', {method:'POST', body: JSON.stringify({name})}).then(loadServices).catch(e=>toast(e.message)));
+const deleteService     = name => guard(`Delete "${name}"? Only allowed if inactive and never issued.`, () => req('/services/delete', {method:'POST', body: JSON.stringify({name})}).then(loadServices).catch(e=>toast(e.message)));
+const addKey    = (name, key) => req('/services/allowlist/add',    {method:'POST', body: JSON.stringify({name, key})}).then(loadServices).catch(e=>toast(e.message));
+const removeKey = (name, key) => guard('Revoke this access key?', () => req('/services/allowlist/remove', {method:'POST', body: JSON.stringify({name, key})}).then(loadServices).catch(e=>toast(e.message)));
+window.activateService = activateService;
+window.deactivateService = deactivateService;
+window.deleteService = deleteService;
+window.addKey = addKey;
+window.removeKey = removeKey;
+
+const updateService = (name, patch) => req('/services/update', {method:'POST', body: JSON.stringify({name, ...patch})}).then(loadServices).catch(e=>toast(e.message));
+window.updateService = updateService;
+
+// Read the add-key input from within the same card (no name-derived id).
+const addKeyForCard = btn => {
+  const card = btn.closest('.svc-card');
+  const input = card ? card.querySelector('.al-input') : null;
+  const key = (input?.value || '').trim();
+  if (!key) { toast('Enter a key first.'); return; }
+  addKey(btn.dataset.name, key);
+};
+
+// Toggle the inline edit panel for a service card.
+const startEdit = btn => {
+  const card = btn.closest('.svc-card');
+  const ed = card ? card.querySelector('.svc-edit') : null;
+  if (ed) ed.style.display = (ed.style.display === 'none' || !ed.style.display) ? 'block' : 'none';
+};
+
+// Collect changed/non-empty fields and POST /services/update.
+const saveEdit = btn => {
+  const card = btn.closest('.svc-card');
+  if (!card) return;
+  const patch = {};
+  const title = card.querySelector('.ed-title')?.value;
+  const desc = card.querySelector('.ed-desc')?.value;
+  const maxV = card.querySelector('.ed-max')?.value?.trim();
+  const expV = card.querySelector('.ed-expires')?.value?.trim();
+  if (title != null && title !== '') patch.title = title;
+  if (desc != null && desc !== '') patch.description = desc;
+  if (maxV) patch.max_issuance = Number(maxV);
+  if (expV) patch.expires = Number(expV);
+  updateService(btn.dataset.name, patch);
+};
+
+// One delegated listener for the Services panel (attach once).
+let _svDelegated = false;
+function attachSvcDelegation() {
+  if (_svDelegated) return;
+  const sv = document.getElementById('sv') || document.getElementById('sec-sv');
+  if (!sv) return;
+  sv.addEventListener('click', (e) => {
+    const t = e.target.closest('button'); if (!t) return;
+    const n = t.dataset.name, k = t.dataset.key;
+    if (t.classList.contains('js-svc-deact')) deactivateService(n);
+    else if (t.classList.contains('js-svc-act')) activateService(n);
+    else if (t.classList.contains('js-svc-del')) deleteService(n);
+    else if (t.classList.contains('js-key-remove')) removeKey(n, k);
+    else if (t.classList.contains('js-key-copy')) copyText(k);
+    else if (t.classList.contains('js-key-add')) addKeyForCard(t);
+    else if (t.classList.contains('js-svc-edit')) startEdit(t);
+    else if (t.classList.contains('js-svc-save')) saveEdit(t);
+  });
+  _svDelegated = true;
+}
+
+// ── Credentials tab (raw cred keysets) ───────────────────────
+async function loadCreds() {
+  try {
+    const d = await req('/cred/overview');
+    document.getElementById("cr-stats").innerHTML =
+      box(d.cred_keysets || 0, "Cred keysets") +
+      box(d.cred_issued || 0, "Credentials issued") +
+      box(d.cred_spent || 0, "Credentials spent");
+
+    const keysets = d.keysets || [];
+    const listEl = document.getElementById("cr-list");
+    if (!keysets.length) {
+      listEl.innerHTML = '<div class="empty">No credential keysets. Use Generate to create one.</div>';
+      return;
+    }
+    listEl.innerHTML =
+      '<table class="tbl"><thead><tr><th>Keyset ID</th><th>Status</th><th>Actions</th></tr></thead><tbody>' +
+      keysets.map(k => {
+        const id = esc(k.id);
+        return '<tr>' +
+          '<td class="mono accent js-cred-copy" style="cursor:pointer" data-id="' + id + '" title="Click to copy">' + id + '</td>' +
+          '<td>' + (k.active ? '<span class="badge b-active">active</span>' : '<span class="badge b-inactive">inactive</span>') + '</td>' +
+          '<td style="white-space:nowrap">' +
+            (k.active
+              ? '<button class="rbtn js-cred-deact" data-id="' + id + '">Deactivate</button>'
+              : '<button class="rbtn js-cred-act" data-id="' + id + '">Activate</button>') +
+          '</td>' +
+        '</tr>';
+      }).join('') +
+      '</tbody></table>';
+    attachCredDelegation();
+  } catch(e) {
+    document.getElementById("cr-list").innerHTML = '<div class="empty">Error: ' + esc(e.message) + '</div>';
+  }
+}
+window.loadCreds = loadCreds;
+
+// One delegated listener for the Credentials panel (attach once).
+let _crDelegated = false;
+function attachCredDelegation() {
+  if (_crDelegated) return;
+  const cr = document.getElementById('cr') || document.getElementById('sec-cr');
+  if (!cr) return;
+  cr.addEventListener('click', (e) => {
+    const t = e.target.closest('.js-cred-copy, button'); if (!t) return;
+    const id = t.dataset.id; if (id == null) return;
+    if (t.classList.contains('js-cred-act')) actCredKs(id);
+    else if (t.classList.contains('js-cred-deact')) deactCredKs(id);
+    else if (t.classList.contains('js-cred-copy')) copyText(id);
+  });
+  _crDelegated = true;
+}
+
+const genCredKs   = ()   => req('/cred/keysets/generate',   {method:'POST'}).then(loadCreds).catch(e=>toast(e.message));
+const actCredKs   = id   => req('/cred/keysets/activate',   {method:'POST', body: JSON.stringify({id})}).then(loadCreds).catch(e=>toast(e.message));
+const deactCredKs = id   => req('/cred/keysets/deactivate', {method:'POST', body: JSON.stringify({id})}).then(loadCreds).catch(e=>toast(e.message));
+window.genCredKs = genCredKs;
+window.actCredKs = actCredKs;
+window.deactCredKs = deactCredKs;
+
+// ── Init ─────────────────────────────────────────────────────
+async function init() {
+  try {
+    await loadOverview();
+    document.getElementById("sta").textContent = "Online";
+    document.getElementById("sta").style.color = "#5eead4";
+  } catch(e) {
+    document.getElementById("sta").textContent = "Error";
+    document.getElementById("sta").style.color = "#fca5a5";
+  }
+  startAuto(loadOverview);
+}
+init();
+</script>
+</body>
+</html>

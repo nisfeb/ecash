@@ -1,0 +1,25 @@
+# build
+.peru
+dist
+dist-dev
+
+# urbit
+zod
+vere-*
+
+# claude
+.claude/*
+!.claude/skills
+
+# node (test dependencies)
+node_modules
+package-lock.json
+
+# config
+.env
+.mcp.json
+
+# generated: shared crypto for %ecash-services (canonical lives in desk/lib;
+# run `make sync-libs` to regenerate). Keeps a single source of truth.
+desk-services/lib/curve.hoon
+desk-services/lib/bdhke.hoon

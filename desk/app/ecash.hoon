@@ -873,6 +873,10 @@
     =.  fee-reserve-min.st   10
     =.  quote-ttl-secs.st    3.600
     =.  self-method-enabled.st  %.n
+    ::  default Lightning backend to %none — the bunt of ln-backend is its head
+    ::  variant (%lnbits with empty url), which would report a phantom configured
+    ::  backend on a fresh mint, so set it explicitly.
+    =.  ln-config.st         [%none ~]
     :_  st
     :~  [%pass /eyre/connect %arvo %e %connect [`/apps/ecash dap.bowl]]
         [%pass /eyre/connect-v1 %arvo %e %connect [`/v1 dap.bowl]]

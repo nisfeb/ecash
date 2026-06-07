@@ -82,16 +82,13 @@ success bodies are HTTP 200 with the real outcome in the JSON (including melt
    keys were exposed** (§14). Generate + activate a clean keyset before taking real
    value if there is any doubt about the install entropy.
 
-2. **Explicitly set the Lightning backend — do not trust the default.**
-   ⚠️ On a fresh install `ln-config` is **not** initialized to `%none`; it bunts to
-   an empty-URL **`lnbits`** backend, so `GET .../lightning` will report
-   `type:"lnbits", configured:true` with a blank URL before you configure
-   anything. Always run `POST /apps/ecash/admin/api/lightning/configure` with
-   either `{type:"none"}` (to truly disable bolt11) or a real
-   `{type:"lnbits",url,api_key}` / `{type:"lnd",url,macaroon}`. With a genuine
-   `%none`, bolt11 mint/melt are inert and `/v1/info` omits the bolt11 method.
-   (Recommended hardening: set `ln-config` to `[%none ~]` in `on-init` — see §18
-   known quirks.)
+2. **Configure the Lightning backend before taking bolt11 traffic.** A fresh
+   install defaults `ln-config` to `%none`, so bolt11 mint/melt are inert and
+   `/v1/info` omits the bolt11 method until you configure one. When ready, run
+   `POST /apps/ecash/admin/api/lightning/configure` with a real
+   `{type:"lnbits",url,api_key}` / `{type:"lnd",url,macaroon}`; or leave
+   `{type:"none"}` to run credentials-only. Confirm the result with
+   `GET .../lightning`.
 
 3. **Leave `self_method_enabled` OFF.** The `self` method mints sats with **no
    Lightning deposit** and melts with a fake preimage — it is a free-money switch
@@ -521,8 +518,6 @@ audits and re-verified. Key invariants:
 3. **No bounds-checking** on economic settings (§9).
 4. **Secrets live in the pier in cleartext**; backup hygiene and credential
    least-privilege are yours (§10, §14).
-5. The **fresh-install phantom LNbits backend** must be corrected explicitly
-   (§2.2).
 
 ---
 
@@ -550,9 +545,6 @@ longer hardcodes a session cookie): `URBAUTH_COOKIE=<ship-cookie> npm run
 test:conformance`. Hoon unit tests: `-test /=ecash=/tests/test/hoon`.
 
 **Known quirks (don't be surprised):**
-- **Fresh-install Lightning default** bunts to an empty-URL `lnbits` backend, not
-  `%none` (§2.2). Recommended code hardening: set `ln-config` to `[%none ~]` in
-  `on-init`.
 - **Version strings differ**: `/v1/info` reports `ecash/0.2.0` while the legacy
   `/apps/ecash` status reports `0.2.0`.
 - **`/lightning/test` doesn't probe the node** — it only reports config presence.

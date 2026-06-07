@@ -1007,7 +1007,23 @@
     ::
         [%'GET' %apps %ecash %admin ~]
       :_  st
-      (give-http eyre-id 200 [['content-type' 'text/html'] ~] `(as-octs:mimes:html (rap 3 (join `@t`10 `wain`dashboard-lines))))
+      =/  nonce=@t  (csp-nonce eny.bowl)
+      =/  body=@t
+        (sub-nonce (rap 3 (join `@t`10 `wain`dashboard-lines)) nonce)
+      =/  csp=@t
+        %-  crip
+        ;:  weld
+          "default-src 'self'; "
+          "script-src 'self' 'nonce-"  (trip nonce)  "'; "
+          "style-src 'self' 'unsafe-inline'; "
+          "img-src 'self' data:; object-src 'none'; "
+          "base-uri 'none'; frame-ancestors 'none'"
+        ==
+      =/  hdrs=header-list:http
+        :~  ['content-type' 'text/html']
+            ['content-security-policy' csp]
+        ==
+      (give-http eyre-id 200 hdrs `(as-octs:mimes:html body))
     ::
     ::  Admin API: keyset management
     ::
@@ -3393,12 +3409,39 @@
     ^-  (list card)
     =/  bod  (as-octs:mimes:html (en:json:html (pairs:enjs:format ['detail' s+msg]~)))
     (give-http eyre-id code [['content-type' 'application/json'] ~] `bod)
+  ::  csp-nonce: a per-response random hex nonce for the dashboard's inline
+  ::  <script>, so script-src stays locked down (no 'unsafe-inline' — an
+  ::  injected <script> or on*= handler cannot run without this nonce).
+  ++  csp-nonce
+    |=  e=@
+    ^-  @t
+    =/  raw=tape  (trip (scot %ux (shax e)))
+    (crip (scag 32 (skip (slag 2 raw) |=(c=@t =('.' c)))))
+  ::  sub-nonce: splice the generated nonce into the dashboard placeholder.
+  ++  sub-nonce
+    |=  [html=@t nonce=@t]
+    ^-  @t
+    =/  hay=tape  (trip html)
+    =/  nee=tape  "__CSP_NONCE__"
+    =/  hits=(list @ud)  (fand nee hay)
+    ?~  hits  html
+    =/  i=@ud  i.hits
+    (crip :(weld (scag i hay) (trip nonce) (slag (add i (lent nee)) hay)))
   ++  give-http
     |=  [eyre-id=@ta code=@ud hdrs=header-list:http data=(unit octs)]
     ^-  (list card)
+    ::  honor a caller-supplied Content-Security-Policy (the admin dashboard
+    ::  needs a nonce'd script-src + inline styles); else apply the strict
+    ::  default used by the public API surface.
+    =/  has-csp=?
+      %+  lien  hdrs
+      |=  [k=@t v=@t]
+      =('content-security-policy' k)
     =/  sec-hdrs=header-list:http
-      :~  ['content-security-policy' (crip "default-src 'self'; frame-ancestors 'none'")]
-          ['x-frame-options' 'DENY']
+      %+  weld
+        ?:  has-csp  ~
+        ~[['content-security-policy' (crip "default-src 'self'; frame-ancestors 'none'")]]
+      :~  ['x-frame-options' 'DENY']
           ['x-content-type-options' 'nosniff']
       ==
     =/  all-hdrs=header-list:http  (weld hdrs sec-hdrs)

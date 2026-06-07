@@ -1,0 +1,10 @@
+:~
+  title+'Cashu Mint'
+  info+'A Cashu ecash mint — Lightning-backed bearer tokens, in pure Hoon'
+  color+0xf7.931a
+  image+'/apps/ecash/icon'
+  version+[1 0 0]
+  website+'https://github.com/nisfeb/ecash'
+  license+'PolyForm Noncommercial 1.0.0'
+  site+/apps/ecash/admin
+==

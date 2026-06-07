@@ -6,6 +6,7 @@
 /-  *ecash
 /+  default-agent, dbug, *bdhke
 /*  dashboard-lines  %txt  /app/dashboard/txt
+/*  icon-svg         %txt  /app/icon-svg/txt
 |%
 +$  state-6
   $:  %6
@@ -995,6 +996,12 @@
       :_  st  (get-keys-all eyre-id)
         [%'GET' %apps %ecash %info ~]
       :_  st  (get-info eyre-id)
+    ::
+    ::  Landscape tile icon (public — served for the docket image)
+    ::
+        [%'GET' %apps %ecash %icon ~]
+      :_  st
+      (give-http eyre-id 200 [['content-type' 'image/svg+xml'] ~] `(as-octs:mimes:html (rap 3 (join `@t`10 `wain`icon-svg))))
     ::
     ::  Admin HTML dashboard
     ::

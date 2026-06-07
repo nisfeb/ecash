@@ -77,6 +77,29 @@ The mint generates a keyset with 10 denominations (1, 2, 4, 8, 16, 32, 64, 128, 
 
 ---
 
+## Demo
+
+`demo.mjs` is a narrated, presentation-paced walkthrough of the whole ecash
+lifecycle against a running mint — useful for showing the system to others. In
+five acts (Alice & Bob) it: meets the mint, deposits sats over Lightning to
+receive blind-signed ecash, pays a peer via a swap, shows that double-spending is
+rejected, and cashes out back to Lightning with NUT-08 change. The crypto is real
+BDHKE; no real money moves (a mock LNbits backend simulates the Lightning side).
+
+```
+npm run mock:lnbits        # start the mock Lightning backend on :3338
+# configure the mint to use it (admin), then:
+npm run demo               # narrated, paced for a live audience
+node demo.mjs --fast       # same flow, no pauses
+node demo.mjs --amount 250 # vary Alice's deposit (12–1000 sats)
+```
+
+If a prerequisite is missing (mint unreachable, no Lightning backend, mock not
+running) the demo prints the exact command to fix it instead of failing. Override
+endpoints with `SHIP_URL`, `MOCK_URL`, and `API_KEY` env vars.
+
+---
+
 ## Cashu Protocol Endpoints
 
 All standard Cashu endpoints are unauthenticated, served at `/v1/*`:

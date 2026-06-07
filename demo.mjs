@@ -29,6 +29,25 @@ const MOCK_URL = process.env.MOCK_URL || 'http://localhost:3338';
 const API_KEY  = process.env.API_KEY  || 'test-api-key';
 const FAST = process.argv.includes('--fast') || process.env.FAST === '1';
 
+// --amount N (or --amount=N): how many sats Alice deposits. Capped at 12..1000
+// so the fee reserve stays at its 10-sat floor and the change math is exact.
+function parseAmount() {
+  const argv = process.argv.slice(2);
+  let raw = null;
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i].startsWith('--amount=')) raw = argv[i].slice('--amount='.length);
+    else if (argv[i] === '--amount') raw = argv[i + 1];
+  }
+  if (raw == null) return 100;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 12 || n > 1000) {
+    console.error(`--amount must be a whole number from 12 to 1000 (got "${raw}").`);
+    process.exit(1);
+  }
+  return n;
+}
+const AMOUNT = parseAmount();
+
 // ───────────────────────── terminal niceties ─────────────────────────
 const C = {
   reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m',
@@ -190,7 +209,7 @@ async function main() {
 
   // ───── ACT 2 ─────────────────────────────────────────────────────
   act(2, 'Alice deposits over Lightning');
-  const DEPOSIT = 100;
+  const DEPOSIT = AMOUNT;
   narr(`Alice wants ${DEPOSIT} sats of ecash. She asks the mint for a Lightning invoice.`);
   const q = await jpost('/v1/mint/quote/bolt11', { amount: DEPOSIT });
   step(`Mint issued invoice: ${C.gry}${short(q.request, 28)}${C.reset}   ${C.dim}(quote ${short(q.quote, 8)})${C.reset}`);
@@ -215,7 +234,7 @@ async function main() {
 
   // ───── ACT 3 ─────────────────────────────────────────────────────
   act(3, 'Alice pays Bob');
-  const SEND = 40;
+  const SEND = Math.max(11, Math.floor(DEPOSIT * 0.4));   // leaves Bob enough to cash out, Alice change
   narr(`Alice pays Bob ${SEND} sats. In Cashu this is a "swap": Alice hands her`);
   narr('tokens to the mint, which burns them and issues fresh ones — some for Bob,');
   narr('the rest as Alice\'s change. The mint just sees tokens in, tokens out.');

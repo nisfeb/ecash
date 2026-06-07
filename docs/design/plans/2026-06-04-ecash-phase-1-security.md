@@ -21,9 +21,9 @@ This plan assumes a local dev ship:
 
 1. Edit files under `desk/` in the repo.
 2. **Sync to the ship:** `cp -r desk/* zod/ecash/`
-3. **Commit on the ship:** in dojo run `|commit %ecash` (watch for build errors). *Automation: ricsul MCP `commit-desk`.*
+3. **Commit on the ship:** in dojo run `|commit %ecash` (watch for build errors).
 4. **Run the test:**
-   - Hoon unit tests: in dojo `-test /=ecash=/tests/test/hoon` *(automation: ricsul `run-tests`)*
+   - Hoon unit tests: in dojo `-test /=ecash=/tests/test/hoon`
    - JS e2e: `node test-<name>.mjs` (prefix `SHIP_CODE=… ` when the test hits admin)
 
 Where a step says "rebuild + commit," it means steps 2–3 above.

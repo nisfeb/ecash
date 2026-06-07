@@ -75,6 +75,8 @@ mock-lnbits.mjs          Mock LNbits server for Lightning testing
 
 The mint generates a keyset with 10 denominations (1, 2, 4, 8, 16, 32, 64, 128, 256, 512 sats) on first install.
 
+To also run the zero-value credentials/access layer, install the **`%ecash-services`** desk from `desk-services/` the same way. On a fresh clone, run `make sync-libs` **first** — it copies the shared crypto (`lib/curve.hoon`, `lib/bdhke.hoon`) from `desk/lib` into `desk-services/lib` (those copies are generated and gitignored), otherwise the services build fails.
+
 ---
 
 ## Demo
@@ -199,19 +201,18 @@ Configure via the admin dashboard, admin API, or dojo:
 
 ## Admin Dashboard
 
-`GET /apps/ecash/admin` serves a single-page admin UI (authenticated via ship cookie) with seven tabs:
+`GET /apps/ecash/admin` serves a single-page admin UI (authenticated via the ship cookie) with six tabs:
 
-- **Overview** — Mint/melt quote summaries, active keyset, settings form, services summary card. The page is visually split into **orange** "₿ Value-bearing" blocks (Bitcoin orange, `#f7931a`) and **teal** "🔑 Access" blocks (`#14b8a6`) so you can tell at a glance which data is money and which is access control.
-- **Keysets** — List, generate, activate/deactivate, set fees, view denomination keys (orange)
-- **Quotes** — Filterable list (all/mint/melt/unpaid/paid/issued), delete (orange)
-- **Tokens** — Spent counts, check secret/Y-point status (orange)
-- **Lightning** — Backend status, configure/remove, connection info (orange)
-- **Services** — Create/list/activate/delete services, manage per-service access-key allowlists, view issuance caps and expiration (teal)
+- **Overview** — Mint/melt quote summaries, active keyset, liability counters, settings form
+- **Keysets** — List, generate, activate/deactivate, set fees, view denomination keys
+- **Quotes** — Filterable list (all/mint/melt/unpaid/paid/issued), delete
+- **Tokens** — Spent counts, check secret/Y-point status
+- **Lightning** — Backend status, configure/remove, connection info
 - **Info** — NUT-06 mint name/description, edit form
 
-Each service card shows its active/inactive badge, optional `expired` badge, optional `🔐 N keys` or `public` badge, an issuance gauge when `max_issuance` is set, and an inline access-key panel where the admin can paste plaintext keys, copy them, or revoke them.
-
 Stats bar shows: tokens issued/spent, issued/redeemed/outstanding sats, LN backend, pending requests.
+
+Service and credential management lives in the separate `%ecash-services` agent, which serves its own dashboard at `/apps/ecash-services/admin` (see the Credential and Services sections below).
 
 ## Admin API
 
@@ -545,14 +546,14 @@ URBAUTH_COOKIE=<ship-cookie> npm run test:conformance
 -test /=ecash=/tests/test/hoon
 ```
 
-Current non-Lightning totals: **85 assertions passing** across e2e, vectors, p2pk, cred, and services suites.
+The JS suites assert mint/swap/melt value conservation, NUT-12 DLEQ, P2PK multisig, credentials, service scoping, admin auth, and parse robustness. Run `npm run test:all` for the full set.
 
 ---
 
 ## State
 
-The `%ecash` agent state (version 11) contains (the credential/services fields moved to the
-`%ecash-services` agent in Phase 3):
+The `%ecash` agent state (version 13) contains (the credential/services fields moved to the
+`%ecash-services` agent; later migrations added the bolt11 melt-reconciliation state):
 
 | Field | Type | Description |
 |-------|------|-------------|

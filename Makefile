@@ -14,6 +14,7 @@
 # %ecash-services copies from it (they are gitignored). Run before building
 # the %ecash-services desk.
 sync-libs:
+	mkdir -p desk-services/lib
 	cp desk/lib/curve.hoon desk/lib/bdhke.hoon desk-services/lib/
 
 # Run core tests (no Lightning required)

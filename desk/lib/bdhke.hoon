@@ -186,6 +186,10 @@
   ::  R = s*G - e*P  (s*G uses jetted priv-to-pub)
   =/  sg  (pt-mul s pt-gen)
   =/  ep  (pt-mul e p-even)
+  ::  BIP-340: R = s*G - e*P must not be the point at infinity (=> invalid).
+  ::  sg + (-ep) is infinity exactly when sg == ep; affine pt-add would crash on
+  ::  that mutual-inverse case, so reject it here (return %.n) instead.
+  ?:  =(sg ep)  %.n
   =/  r-pt  (pt-add sg (pt-neg ep))
   ::  Verify: R.x == r and R.y is even
   ?.  =(x.r-pt r)  %.n

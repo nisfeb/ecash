@@ -1561,6 +1561,9 @@
     =/  change-outputs=(list json)  (get-array p.jon 'outputs')
     ?:  (gth (lent change-outputs) max-batch)
       :_  st  (give-err eyre-id 400 'batch-too-large')
+    ::  Reject duplicate-x (B_/-B_) change outputs, matching swap and mint.
+    ?:  (has-dup-x change-outputs)
+      :_  st  (give-err eyre-id 400 'duplicate-output')
     =.  spent.st                updated-spent
     =.  spent-ys.st             updated-spent-ys
     =.  total-redeemed-sats.st  (add total-redeemed-sats.st input-total)

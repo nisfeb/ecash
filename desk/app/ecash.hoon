@@ -2851,6 +2851,8 @@
       ==
     =.  pending.st  (~(del by pending.st) wire-id)
     =/  status  status-code.response-header.res
+    ::  LNbits returns 201 (Created) for create-invoice and pay; accept any 2xx.
+    =/  is-2xx=?  &((gte status 200) (lth status 300))
     =/  body=@t
       ?~  full-file.res  ''
       q.data.u.full-file.res
@@ -2861,7 +2863,7 @@
     ::
     ::  -- mint-quote-create: LN invoice created --
         %mint-quote-create
-      ?:  |(!=(200 status) ?=(~ maybe-json))
+      ?:  |(!is-2xx ?=(~ maybe-json))
         ~&  >>>  [%ecash-ln-create-invoice-failed status]
         :_  st
         (give-err eyre-id.pend 502 'lightning-invoice-creation-failed')
@@ -2931,7 +2933,7 @@
     ::
     ::  -- melt-quote-create: bolt11 decoded, create quote --
         %melt-quote-create
-      ?:  |(!=(200 status) ?=(~ maybe-json))
+      ?:  |(!is-2xx ?=(~ maybe-json))
         ~&  >>>  [%ecash-ln-decode-failed status]
         :_  st
         (give-err eyre-id.pend 502 'lightning-decode-failed')
@@ -2995,7 +2997,6 @@
       ::  proven failure -- we keep the quote %pending (proofs stay spent) and
       ::  reply NUT-05 PENDING. We NEVER un-spend or set %failed here; the only
       ::  authoritative failure comes from a later status check (%melt-check).
-      =/  is-2xx=?  &((gte status 200) (lth status 300))
       =/  pre-settled=?
         ?&  is-2xx
             ?=(^ maybe-json)

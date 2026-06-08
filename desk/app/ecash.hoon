@@ -1048,6 +1048,8 @@
       :_  st  (admin-quotes eyre-id)
         [%'POST' %apps %ecash %admin %api %quotes %delete ~]
       (admin-quote-delete eyre-id req-body)
+        [%'POST' %apps %ecash %admin %api %quotes %revoke ~]
+      (admin-quote-revoke eyre-id req-body)
     ::
     ::  Admin API: melt abort (operator-confirmed-failed backstop)
     ::
@@ -2479,6 +2481,38 @@
       %-  give-json  :_  eyre-id
       (pairs:enjs:format ['deleted' b+%.y] ['quote_id' s+qid] ['type' s+'melt']~)
     :_(st (give-err eyre-id 400 'invalid-type'))
+  ::  admin-quote-revoke: write off a mint quote as abandoned ("failed test").
+  ::  Unlike delete (which refuses %paid/%issued to protect owed value), revoke is
+  ::  the deliberate override: it deletes the quote and, if it was %issued, removes
+  ::  the amount that was added to total-issued-sats at mint time (underflow-
+  ::  guarded) so it stops counting as outstanding liability. The signed tokens are
+  ::  declared never-to-be-redeemed. Body: {"quote_id": "..."}.
+  ++  admin-quote-revoke
+    |=  [eyre-id=@ta req-body=(unit octs)]
+    ^-  (quip card state-13)
+    =/  parsed  (parse-object-body req-body)
+    ?:  ?=(%| -.parsed)  :_(st (give-err eyre-id 400 p.parsed))
+    =/  jon  p.parsed
+    ?>  ?=([%o *] jon)
+    =/  qid=@t  (get-str p.jon 'quote_id')
+    ?:  =('' qid)  :_(st (give-err eyre-id 400 'missing-quote_id'))
+    =/  maybe-q  (~(get by mint-quotes.st) qid)
+    ?~  maybe-q  :_(st (give-err eyre-id 404 'quote-not-found'))
+    =/  q  u.maybe-q
+    =/  was-issued=?  =(%issued state.q)
+    =/  dec=@ud  ?:(was-issued amount.q 0)
+    =.  total-issued-sats.st
+      ?:((gte total-issued-sats.st dec) (sub total-issued-sats.st dec) 0)
+    =.  mint-quotes.st  (~(del by mint-quotes.st) qid)
+    :_  st
+    %-  give-json  :_  eyre-id
+    %-  pairs:enjs:format
+    :~  ['revoked' b+%.y]
+        ['quote_id' s+qid]
+        ['type' s+'mint']
+        ['was_state' s+(quote-state-text state.q)]
+        ['issued_decremented' (numb:enjs:format dec)]
+    ==
   ::  admin-melt-abort: operator-confirmed-failed backstop for a stuck %pending
   ::  bolt11 melt. When the operator has independently verified the Lightning
   ::  payment did NOT and will not settle, this un-spends EXACTLY the persisted

@@ -77,6 +77,11 @@ The mint generates a keyset with 10 denominations (1, 2, 4, 8, 16, 32, 64, 128, 
 
 To also run the zero-value credentials/access layer, install the **`%ecash-services`** desk from `desk-services/` the same way. On a fresh clone, run `make sync-libs` **first** — it copies the shared crypto (`lib/curve.hoon`, `lib/bdhke.hoon`) from `desk/lib` into `desk-services/lib` (those copies are generated and gitignored), otherwise the services build fails.
 
+**Running a public mint?** See [`docs/INSTALL.md`](docs/INSTALL.md) for the full
+walkthrough — installing both desks, exposing the ship over HTTPS with a
+rate-limiting reverse proxy, configuring the Lightning backend, and the
+pre-production safety checklist.
+
 ---
 
 ## Demo

@@ -3067,9 +3067,12 @@
         ?-  -.ln-config.st
             %lnbits
           ?.  (get-bool p.u.maybe-json 'paid')  %.n
-          ::  cross-check settled amount >= quoted amount (NUT robustness):
-          ::  never flip to PAID on an underpaid/zero invoice.
-          (gte (ln-settled-sats p.u.maybe-json) amount.mq)
+          ::  bolt11 invoices are all-or-nothing, so paid:true on the mint's own
+          ::  fixed-amount invoice already means full payment. Some backends omit
+          ::  the settled-amount field; only REJECT on an explicitly-reported
+          ::  underpayment, and trust paid:true when no usable amount is returned.
+          =/  settled  (ln-settled-sats p.u.maybe-json)
+          |(=(0 settled) (gte settled amount.mq))
         ::
             %lnd
           ?.  =('SETTLED' (get-str p.u.maybe-json 'state'))  %.n
@@ -3278,9 +3281,16 @@
       ::  MIG-3: only a still-%pending quote may be settled by an auto check. A
       ::  late SETTLED check arriving after an abort/fail (or a prior settle)
       ::  must NOT re-promote -> re-sign change -> re-emit PAID (double-settle).
-      ?:  &(is-paid !=('' resp-preimage) =(%pending state.mq))
+      ::  SETTLE on a confirmed-paid status (LNbits paid:true / LND SUCCEEDED).
+      ::  We do NOT also require a preimage: some backends (e.g. LNbits over a
+      ::  Spark/CLN funding source) settle outbound payments without exposing one.
+      ::  Settle is the SAFE direction (inputs stay spent, matching the completed
+      ::  payment); only ROLLBACK can double-pay and that path is unchanged
+      ::  (confirmed-failed still needs an explicit LND FAILED). Preimage stored
+      ::  if present.
+      ?:  &(is-paid =(%pending state.mq))
         ::  SETTLED: lock %paid, sign NUT-08 change from persisted outputs, store
-        ::  preimage, clear inflight, reply PAID.
+        ::  preimage (may be empty), clear inflight, reply PAID.
         =/  inflight
           ?~  maybe-inflight  *melt-inflight-entry
           u.maybe-inflight

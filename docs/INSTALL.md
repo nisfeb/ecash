@@ -23,28 +23,31 @@ value → verify**.
 - A **Lightning backend**: an LNbits instance (URL + an invoice/pay API key) **or**
   an LND node (REST URL + a *pay/invoice-scoped* macaroon — not a node-admin one).
 - A **domain + TLS** for the ship (see §3).
-- Shell access to the pier host.
+- Shell access to the pier host, with **[peru](https://github.com/buildinspace/peru)**
+  installed — the build tool that fetches the shared base-dev dependencies.
 
-## 2. Get and install the desks
+## 2. Build and install the desks
 
 ```bash
 git clone https://github.com/nisfeb/ecash
 cd ecash
-make sync-libs          # REQUIRED: generates desk-services/lib/{curve,bdhke}.hoon
+./build.sh              # builds dist/ (%ecash) and dist-services/ (%ecash-services)
 ```
 
-Then, in the ship's **dojo**, install each desk by seeding from `%base` (so it
-picks up the base libs/marks) and overlaying the repo files.
+`build.sh` uses [`peru`](https://github.com/buildinspace/peru) to pull the shared
+base-dev dependencies, producing two complete, self-contained desks. (`build.sh`
+also regenerates the services desk's shared crypto for you — no separate
+`make sync-libs` step needed.)
 
-**The value mint (`%ecash`):**
+**The value mint (`%ecash`)** — in the ship's **dojo**, create and mount the desk:
 
 ```
-|merge %ecash our %base
+|new-desk %ecash
 |mount %ecash
 ```
 ```bash
-# in a shell, copy the repo's desk over the mount:
-cp -r desk/* /path/to/your/pier/ecash/
+# from the repo, deploy the built desk into the mount:
+./build.sh -p /path/to/your/pier/ecash
 ```
 ```
 |commit %ecash          ::  watch for build errors
@@ -55,25 +58,22 @@ cp -r desk/* /path/to/your/pier/ecash/
 you want zero-value credential / service-access tokens:
 
 ```
-|merge %ecash-services our %base
+|new-desk %ecash-services
 |mount %ecash-services
 ```
 ```bash
-cp -r desk-services/* /path/to/your/pier/ecash-services/
+./build.sh services -p /path/to/your/pier/ecash-services
 ```
 ```
 |commit %ecash-services
 |install our %ecash-services
 ```
 
-On first install, `%ecash` auto-generates a keyset (denominations 1…512), sets
-`ln-config` to `%none`, and leaves `self-method` **off** — it comes up safe and
-inert until you configure Lightning. The **Cashu Mint** tile appears in Landscape.
-
-> **Alternative build path:** the repo ships `build.sh` (uses [`peru`](https://github.com/buildinspace/peru))
-> which bundles the base-dev dependencies into `dist/` for a minimal desk —
-> `./build.sh && ./build.sh -p /path/to/pier/ecash`. The merge-from-base path
-> above needs no extra tooling and works for both desks.
+`build.sh -p` wipes and repopulates the mounted desk, so `|new-desk` just needs to
+create it for you to mount. On first install, `%ecash` auto-generates a keyset
+(denominations 1…512), sets `ln-config` to `%none`, and leaves `self-method`
+**off** — it comes up safe and inert until you configure Lightning. The
+**Cashu Mint** tile appears in Landscape.
 
 ## 3. Expose the ship over HTTPS
 

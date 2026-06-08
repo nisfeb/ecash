@@ -1,5 +1,7 @@
 imports:
-  base-dev: ./dist
+  base-dev:
+    - ./dist
+    - ./dist-services
 
 git module base-dev:
   url:    https://github.com/urbit/urbit

@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 
-# Parse arguments
+# Build the ecash desks and (optionally) copy them into a mounted desk.
+#
+#   ./build.sh                          build both desks into dist/ and dist-services/
+#   ./build.sh -p <pier>/ecash          build, then deploy the %ecash mint desk
+#   ./build.sh services -p <pier>/ecash-services   build, then deploy %ecash-services
+#   ./build.sh clean                    remove dist/ and dist-services/
+#
+# Requires peru (https://github.com/buildinspace/peru) to pull the shared
+# base-dev dependencies (default-agent, dbug, the standard marks).
+
 COPY_PATH=""
 COMMAND=""
 
@@ -25,7 +34,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Set default command if none provided
 if [[ -z "$COMMAND" ]]; then
   COMMAND="build"
 fi
@@ -38,98 +46,74 @@ check_peru_installed() {
   fi
 }
 
-copy_to_path() {
-  local target_path="$1"
-  
-  if [[ ! -d dist ]]; then
-    echo "Error: dist directory not found. Run build first." >&2
-    exit 1
-  fi
-  
-  if [[ ! -d "$target_path" ]]; then
-    echo "Error: target path '$target_path' does not exist." >&2
-    exit 1
-  fi
-  
-  echo "Cleaning desk at $target_path..."
-  rm -rf "$target_path"/*
-  
-  echo "Copying dist to $target_path..."
-  cp -r dist/* "$target_path"/
-  
-  echo "Copy completed successfully."
-}
-
-build() {
+# Build both desks: dist/ = %ecash (value mint), dist-services/ = %ecash-services
+# (access layer). peru.yaml imports the shared base-dev files into both.
+sync_deps() {
   check_peru_installed
 
-  if [[ ! -d desk && ! -d desk-dev ]]; then
-    echo "Error: neither desk nor desk-dev directory found." >&2
+  if [[ ! -d desk ]]; then
+    echo "Error: desk directory not found." >&2
     exit 1
   fi
 
-  if [[ -d dist ]]; then
-    echo "Removing existing dist directory..."
-    rm -rf dist
-  fi
+  # Regenerate the shared crypto for the services desk (single source of truth
+  # is desk/lib; these copies are gitignored).
+  mkdir -p desk-services/lib
+  cp desk/lib/curve.hoon desk/lib/bdhke.hoon desk-services/lib/
 
-  echo "Creating dist directory..."
-  mkdir -p dist
-
-  if [[ -d desk-dev ]]; then
-    echo "Copying desk-dev → dist..."
-    cp -r desk-dev/* dist/
-  fi
-
-  if [[ -d desk ]]; then
-    echo "Copying desk → dist..."
-    cp -r desk/* dist/
+  echo "Preparing dist/ and dist-services/..."
+  rm -rf dist dist-services
+  mkdir -p dist dist-services
+  cp -r desk/* dist/
+  if [[ -d desk-services ]]; then
+    cp -r desk-services/* dist-services/
   fi
 
   echo "Running peru sync..."
   if ! peru sync 2>&1; then
-    echo "Error: peru sync failed. Cleaning up dist..." >&2
-    rm -rf dist
+    echo "Error: peru sync failed. Cleaning up..." >&2
+    rm -rf dist dist-services
     exit 1
-  fi
-
-  echo "Build completed successfully."
-  
-  # Copy to specified path if -p flag was used
-  if [[ -n "$COPY_PATH" ]]; then
-    copy_to_path "$COPY_PATH"
   fi
 }
 
-build_dev() {
-  check_peru_installed
+copy_to_path() {
+  local target_path="$1"
+  local dist_dir="${2:-dist}"
 
-  if [[ ! -d desk-dev ]]; then
-    echo "Error: desk-dev directory not found." >&2
+  if [[ ! -d "$dist_dir" ]]; then
+    echo "Error: $dist_dir not found. Run build first." >&2
     exit 1
   fi
 
-  if [[ -d dist-dev ]]; then
-    echo "Removing existing dist-dev directory..."
-    rm -rf dist-dev
+  if [[ ! -d "$target_path" ]]; then
+    echo "Error: target path '$target_path' does not exist (mount the desk first)." >&2
+    exit 1
   fi
 
-  echo "Creating dist-dev directory..."
-  mkdir -p dist-dev
+  echo "Cleaning desk at $target_path..."
+  rm -rf "$target_path"/*
 
-  echo "Copying desk-dev → dist-dev..."
-  cp -r desk-dev/* dist-dev/
+  echo "Copying $dist_dir to $target_path..."
+  cp -r "$dist_dir"/* "$target_path"/
 
-  if [[ -f peru-dev.yaml ]]; then
-    echo "Running peru sync..."
-    if ! peru sync --file=peru-dev.yaml --sync-dir=./ 2>&1; then
-      echo "Error: peru sync failed. Cleaning up dist-dev..." >&2
-      rm -rf dist-dev
-      exit 1
-    fi
+  echo "Copy completed successfully."
+}
+
+build() {
+  sync_deps
+  echo "Build completed (dist/ = %ecash, dist-services/ = %ecash-services)."
+  if [[ -n "$COPY_PATH" ]]; then
+    copy_to_path "$COPY_PATH" dist
   fi
+}
 
-  echo "Dev build completed successfully."
+build_services() {
+  sync_deps
+  echo "Build completed (dist-services/ = %ecash-services)."
+  if [[ -n "$COPY_PATH" ]]; then
+    copy_to_path "$COPY_PATH" dist-services
+  fi
 }
 
 clean() {
@@ -137,9 +121,9 @@ clean() {
     echo "Removing dist directory..."
     rm -rf dist
   fi
-  if [[ -d dist-dev ]]; then
-    echo "Removing dist-dev directory..."
-    rm -rf dist-dev
+  if [[ -d dist-services ]]; then
+    echo "Removing dist-services directory..."
+    rm -rf dist-services
   fi
 }
 
@@ -147,30 +131,30 @@ case "$COMMAND" in
   build)
     build
     ;;
-  build-dev)
-    build_dev
-    ;;
-  help)
-    echo "Usage: $0 [-p path] [build|build-dev|clean|help]"
-    echo
-    echo "  build       : build full desk from desk, desk-dev and dependencies in peru.yaml"
-    echo "  build-dev   : build developer desk from desk-dev and dependencies in peru-dev.yaml"
-    echo "  clean       : clean up dist and dist-dev"
-    echo
-    echo "Options:"
-    echo "  -p path     : after building, copy dist contents to the desk at this path"
-    echo "                (removes existing contents of the desk)"
-    echo
-    echo "  If no command is given, build is the default."
-    echo "  Note: peru must be installed and available in PATH."
-    echo "        See: https://github.com/buildinspace/peru"
+  services)
+    build_services
     ;;
   clean)
     clean
+    ;;
+  help)
+    echo "Usage: $0 [-p path] [build|services|clean|help]"
+    echo
+    echo "  build      : build both desks (dist/ = %ecash, dist-services/ = %ecash-services)"
+    echo "  services   : same build; with -p, deploy the %ecash-services desk"
+    echo "  clean      : remove dist/ and dist-services/"
+    echo
+    echo "Options:"
+    echo "  -p path    : after building, copy the desk into the mounted desk at this path"
+    echo "               (removes existing contents of that desk first)"
+    echo "                 build    + -p  ->  copies dist/ (%ecash)"
+    echo "                 services + -p  ->  copies dist-services/ (%ecash-services)"
+    echo
+    echo "  If no command is given, build is the default."
+    echo "  peru must be installed: https://github.com/buildinspace/peru"
     ;;
   *)
     echo "Error: unknown command '$COMMAND'" >&2
     exit 1
     ;;
 esac
-

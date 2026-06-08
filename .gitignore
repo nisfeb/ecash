@@ -2,6 +2,7 @@
 .peru
 dist
 dist-dev
+dist-services
 
 # urbit
 zod

@@ -59,23 +59,44 @@ mock-lnbits.mjs          Mock LNbits server for Lightning testing
 
 ## Installation
 
-1. Create a desk and copy files:
-   ```
-   |new-desk %ecash
-   |mount %ecash
-   ```
+Build both desks (requires [peru](https://github.com/buildinspace/peru)), then
+install on your ship:
 
-2. Copy the contents of `desk/` into the mounted `zod/ecash/` directory.
+```bash
+git clone https://github.com/nisfeb/ecash && cd ecash
+./build.sh          # builds dist/ (%ecash) and dist-services/ (%ecash-services)
+```
 
-3. Commit and install:
-   ```
-   |commit %ecash
-   |install our %ecash
-   ```
+In the dojo, create and mount the desk; then deploy the built desk into the mount
+and commit:
 
-The mint generates a keyset with 10 denominations (1, 2, 4, 8, 16, 32, 64, 128, 256, 512 sats) on first install.
+```
+|new-desk %ecash
+|mount %ecash
+```
+```bash
+./build.sh -p /path/to/your/pier/ecash    # copies the built desk into the mount
+```
+```
+|commit %ecash
+|install our %ecash
+```
 
-To also run the zero-value credentials/access layer, install the **`%ecash-services`** desk from `desk-services/` the same way. On a fresh clone, run `make sync-libs` **first** — it copies the shared crypto (`lib/curve.hoon`, `lib/bdhke.hoon`) from `desk/lib` into `desk-services/lib` (those copies are generated and gitignored), otherwise the services build fails.
+The mint generates a keyset with 10 denominations (1, 2, 4, 8, 16, 32, 64, 128, 256, 512 sats) on first install — with Lightning off (`%none`) and the free `self` method disabled, so it's safe until you configure it.
+
+To also run the zero-value credentials/access layer, install **`%ecash-services`** the same way:
+
+```
+|new-desk %ecash-services
+|mount %ecash-services
+```
+```bash
+./build.sh services -p /path/to/your/pier/ecash-services
+```
+```
+|commit %ecash-services
+|install our %ecash-services
+```
 
 **Running a public mint?** See [`docs/INSTALL.md`](docs/INSTALL.md) for the full
 walkthrough — installing both desks, exposing the ship over HTTPS with a

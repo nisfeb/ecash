@@ -25,9 +25,10 @@
     "test:melt-fee": "node test-melt-fee.mjs",
     "test:melt": "node test-melt-p6.mjs",
     "test:p2pk-misc": "node test-p6-misc.mjs",
+    "test:restore": "node test-restore.mjs",
     "test:ladder": "node test-ladder-equiv.mjs && node test-ladder-port.mjs && node test-ladder-scalars.mjs",
     "test:security": "node test-admin-auth.mjs && node test-legacy-removed.mjs && node test-parse-robustness.mjs && node test-self-method.mjs && node test-swap-security.mjs",
-    "test:all": "node test-e2e.mjs && node test-conformance.mjs && node test-p2pk.mjs && node test-p6-misc.mjs && node test-cred.mjs && node test-services.mjs && node test-services-scope.mjs && node test-swap-security.mjs && node test-vectors.mjs && node test-melt-fee.mjs && node test-melt-p6.mjs && node test-admin-auth.mjs && node test-self-method.mjs && node test-parse-robustness.mjs && node test-legacy-removed.mjs && node test-dashboards.mjs",
+    "test:all": "node test-e2e.mjs && node test-conformance.mjs && node test-p2pk.mjs && node test-p6-misc.mjs && node test-cred.mjs && node test-services.mjs && node test-services-scope.mjs && node test-swap-security.mjs && node test-vectors.mjs && node test-melt-fee.mjs && node test-melt-p6.mjs && node test-admin-auth.mjs && node test-self-method.mjs && node test-parse-robustness.mjs && node test-legacy-removed.mjs && node test-dashboards.mjs && node test-restore.mjs",
     "mock:lnbits": "node mock-lnbits.mjs",
     "demo": "node demo.mjs",
     "bench": "node bench-crypto.mjs"

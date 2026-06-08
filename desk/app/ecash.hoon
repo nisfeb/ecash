@@ -216,13 +216,42 @@
       self-method-enabled=?
       melt-inflight=(map @t melt-inflight-entry)
   ==
-+$  versioned-state  $%(state-6 state-7 state-8 state-9 state-10 state-11 state-12 state-13)
+::  state-14: identical to state-13 plus `restore` — a durable map from each
+::  blinded message B_ (hex) to the signature the mint issued for it, so a wallet
+::  that lost its tokens can re-derive its B_ (NUT-13 deterministic secrets) and
+::  recover the signatures via POST /v1/restore (NUT-09). The 13->14 migration
+::  inits it ~.
++$  restored-sig  [amount=@ud id=@t c-hex=@t e=@t s=@t]
++$  state-14
+  $:  %14
+      keysets=(map @t keyset)
+      active-keyset=@t
+      spent=(set @t)
+      spent-ys=(set @t)
+      counter=@ud
+      mint-quotes=(map @t mint-quote)
+      melt-quotes=(map @t melt-quote)
+      ln-config=ln-backend
+      pending=(map @ta pending-req-v2)
+      total-issued-sats=@ud
+      total-redeemed-sats=@ud
+      mint-name=@t
+      mint-description=@t
+      fee-reserve-pct=@ud
+      fee-reserve-min=@ud
+      quote-ttl-secs=@ud
+      melt-change=(map @t (list json))
+      self-method-enabled=?
+      melt-inflight=(map @t melt-inflight-entry)
+      restore=(map @t restored-sig)
+  ==
++$  versioned-state  $%(state-6 state-7 state-8 state-9 state-10 state-11 state-12 state-13 state-14)
 +$  card  card:agent:gall
 --
 %-  agent:dbug
 ^-  agent:gall
 =<
-=|  state-13
+=|  state-14
 =*  state  -
 |_  =bowl:gall
 +*  this  .
@@ -240,7 +269,8 @@
       =?  prev  ?=(%10 -.prev)  (state-10-to-11 prev)
       =?  prev  ?=(%11 -.prev)  (state-11-to-12 prev)
       =?  prev  ?=(%12 -.prev)  (state-12-to-13 prev)
-      ?>  ?=(%13 -.prev)
+      =?  prev  ?=(%13 -.prev)  (state-13-to-14 prev)
+      ?>  ?=(%14 -.prev)
       ::  Do NOT arm /cleanup here: on-init arms it once and on-arvo re-arms
       ::  after each fire, so arming on every upgrade leaks timers (LOW-6).
       [~ this(state prev)]
@@ -455,6 +485,33 @@
         self-method-enabled.prev
         *(map @t melt-inflight-entry)
     ==
+  ::  state-13 -> state-14: add the restore map (NUT-09 signature store), empty.
+  ::
+  ++  state-13-to-14
+    |=  prev=state-13
+    ^-  state-14
+    :*  %14
+        keysets.prev
+        active-keyset.prev
+        spent.prev
+        spent-ys.prev
+        counter.prev
+        mint-quotes.prev
+        melt-quotes.prev
+        ln-config.prev
+        pending.prev
+        total-issued-sats.prev
+        total-redeemed-sats.prev
+        mint-name.prev
+        mint-description.prev
+        fee-reserve-pct.prev
+        fee-reserve-min.prev
+        quote-ttl-secs.prev
+        melt-change.prev
+        self-method-enabled.prev
+        melt-inflight.prev
+        *(map @t restored-sig)
+    ==
   --
 ++  on-init
   ^-  (quip card _this)
@@ -530,7 +587,7 @@
 ::  -- Helper core --
 |%
 ++  ec
-  |_  [=bowl:gall st=state-13]
+  |_  [=bowl:gall st=state-14]
   ::
   ::  -- JSON number parsing (bare digits, no Hoon dot separators) --
   ++  parse-ud
@@ -597,7 +654,7 @@
   ::    entries whose quote survives in live-melt, retaining %paid melt quotes
   ::    here also preserves their unredeemed change automatically.
   ++  run-cleanup
-    ^-  state-13
+    ^-  state-14
     =/  live-mint
       %-  ~(gas by *(map @t mint-quote))
       %+  skim  ~(tap by mint-quotes.st)
@@ -853,7 +910,7 @@
   ::  -- Initialization --
   ::
   ++  init
-    ^-  (quip card state-13)
+    ^-  (quip card state-14)
     =/  keys      (gen-ks-keys (shax eny.bowl))
     =/  ks-id=@t  (compute-ks-id pubkeys.keys 'sat' 0 0)
     =/  ks=keyset
@@ -905,7 +962,7 @@
   ::
   ++  handle-http
     |=  [eyre-id=@ta req=inbound-request:eyre]
-    ^-  (quip card state-13)
+    ^-  (quip card state-14)
     =/  req-body            body.request.req
     =/  segs=(list @t)      (parse-request-path url.request.req)
     =/  route=(list @t)     [method.request.req segs]
@@ -976,6 +1033,9 @@
     ::
         [%'POST' %v1 %checkstate ~]
       (post-checkstate eyre-id req-body)
+    ::  NUT-09: seed-phrase recovery — return previously-issued signatures.
+        [%'POST' %v1 %restore ~]
+      (post-restore eyre-id req-body)
     ::
     ::  Legacy public endpoints (kept for backwards-compat)
     ::
@@ -1168,7 +1228,7 @@
   ::
   ++  post-swap
     |=  [eyre-id=@ta req-body=(unit octs)]
-    ^-  (quip card state-13)
+    ^-  (quip card state-14)
     =/  parsed  (parse-object-body req-body)
     ?:  ?=(%| -.parsed)  :_  st  (give-err eyre-id 400 p.parsed)
     =/  jon  p.parsed
@@ -1197,6 +1257,7 @@
     ?:  (has-dup-x outputs)
       :_  st  (give-err eyre-id 400 'duplicate-output')
     =/  sigs  (sign-outputs outputs)
+    =.  restore.st              (~(uni by restore.st) (restore-entries outputs sigs))
     =.  spent.st                updated-spent
     =.  spent-ys.st             updated-spent-ys
     =.  counter.st              (add counter.st (lent sigs))
@@ -1211,7 +1272,7 @@
   ::
   ++  post-mint-quote
     |=  [eyre-id=@ta method=@t req-body=(unit octs)]
-    ^-  (quip card state-13)
+    ^-  (quip card state-14)
     ?.  |(=('self' method) =('bolt11' method))
       :_  st  (give-err eyre-id 400 'unsupported-method')
     ?:  &(=('self' method) !self-method-enabled.st)
@@ -1271,7 +1332,7 @@
   ::
   ++  get-mint-quote
     |=  [eyre-id=@ta method=@t quote-id=@t]
-    ^-  (quip card state-13)
+    ^-  (quip card state-14)
     ?.  |(=('self' method) =('bolt11' method))
       :_  st  (give-err eyre-id 400 'unsupported-method')
     =/  maybe-mq  (~(get by mint-quotes.st) quote-id)
@@ -1301,7 +1362,7 @@
   ::
   ++  post-mint-v1
     |=  [eyre-id=@ta method=@t req-body=(unit octs)]
-    ^-  (quip card state-13)
+    ^-  (quip card state-14)
     ?.  |(=('self' method) =('bolt11' method))
       :_  st  (give-err eyre-id 400 'unsupported-method')
     ?:  &(=('self' method) !self-method-enabled.st)
@@ -1345,6 +1406,7 @@
     ?:  (has-dup-x outputs)
       :_  st  (give-err eyre-id 400 'duplicate-output')
     =/  sigs  (sign-outputs outputs)
+    =.  restore.st              (~(uni by restore.st) (restore-entries outputs sigs))
     =.  mint-quotes.st          (~(put by mint-quotes.st) qid mq(state %issued))
     =.  counter.st              (add counter.st (lent sigs))
     =.  total-issued-sats.st    (add total-issued-sats.st output-total)
@@ -1357,7 +1419,7 @@
   ::
   ++  post-melt-quote
     |=  [eyre-id=@ta method=@t req-body=(unit octs)]
-    ^-  (quip card state-13)
+    ^-  (quip card state-14)
     ?.  |(=('self' method) =('bolt11' method))
       :_  st  (give-err eyre-id 400 'unsupported-method')
     ?:  &(=('self' method) !self-method-enabled.st)
@@ -1412,7 +1474,7 @@
   ::
   ++  get-melt-quote
     |=  [eyre-id=@ta method=@t quote-id=@t]
-    ^-  (quip card state-13)
+    ^-  (quip card state-14)
     ?.  |(=('self' method) =('bolt11' method))
       :_  st  (give-err eyre-id 400 'unsupported-method')
     =/  maybe-mq  (~(get by melt-quotes.st) quote-id)
@@ -1448,7 +1510,7 @@
   ::
   ++  post-melt-v1
     |=  [eyre-id=@ta method=@t req-body=(unit octs)]
-    ^-  (quip card state-13)
+    ^-  (quip card state-14)
     ?.  |(=('self' method) =('bolt11' method))
       :_  st  (give-err eyre-id 400 'unsupported-method')
     ?:  &(=('self' method) !self-method-enabled.st)
@@ -1510,6 +1572,7 @@
       ::  NUT-08: compute overpaid and sign change outputs
       =/  overpaid=@ud  (sub input-total (add fee amount.mq))
       =/  change-sigs=(list json)  (sign-change-outputs change-outputs overpaid)
+      =.  restore.st  (~(uni by restore.st) (restore-entries change-outputs change-sigs))
       =?  melt-change.st  !=(~ change-sigs)
         (~(put by melt-change.st) qid change-sigs)
       :_  st
@@ -1642,6 +1705,8 @@
             (pairs:enjs:format ['supported' b+%.y]~)
             :-  '8'
             (pairs:enjs:format ['supported' b+%.y]~)
+            :-  '9'
+            (pairs:enjs:format ['supported' b+%.y]~)
             :-  '10'
             (pairs:enjs:format ['supported' b+%.y]~)
             :-  '11'
@@ -1658,9 +1723,49 @@
   ::  NUT-07: POST /v1/checkstate -check token spent status
   ::  ============================================================
   ::
+  ::  NUT-09: POST /v1/restore. For each blinded message the wallet re-derived
+  ::  from its seed, return the signature the mint previously issued for that B_
+  ::  (if any). Unknown B_ are omitted; the wallet then uses /v1/checkstate to
+  ::  find which recovered tokens are still unspent.
+  ++  post-restore
+    |=  [eyre-id=@ta req-body=(unit octs)]
+    ^-  (quip card state-14)
+    =/  parsed  (parse-object-body req-body)
+    ?:  ?=(%| -.parsed)  :_(st (give-err eyre-id 400 p.parsed))
+    =/  jon  p.parsed
+    ?>  ?=([%o *] jon)
+    =/  outs-j  (~(get by p.jon) 'outputs')
+    ?.  ?=([~ %a *] outs-j)  :_(st (give-err eyre-id 400 'missing-outputs'))
+    =/  outs=(list json)  p.u.outs-j
+    ?:  (gth (lent outs) max-batch)  :_(st (give-err eyre-id 400 'batch-too-large'))
+    =|  os=(list json)
+    =|  ss=(list json)
+    =/  rest  outs
+    |-  ^-  (quip card state-14)
+    ?~  rest
+      :_  st
+      %-  give-json  :_  eyre-id
+      (pairs:enjs:format ['outputs' a+(flop os)] ['signatures' a+(flop ss)]~)
+    =/  msg=json  i.rest
+    ?.  ?=([%o *] msg)  $(rest t.rest)
+    =/  b-hex  (get-str p.msg 'B_')
+    ?:  =('' b-hex)  $(rest t.rest)
+    =/  found  (~(get by restore.st) b-hex)
+    ?~  found  $(rest t.rest)
+    =/  rs  u.found
+    =/  out-j=json
+      (pairs:enjs:format ['amount' (numb:enjs:format amount.rs)] ['B_' s+b-hex] ['id' s+id.rs]~)
+    =/  sig-j=json
+      %-  pairs:enjs:format
+      :~  ['amount' (numb:enjs:format amount.rs)]
+          ['id' s+id.rs]
+          ['C_' s+c-hex.rs]
+          ['dleq' [%o (malt ~[['e' s+e.rs] ['s' s+s.rs]])]]
+      ==
+    $(rest t.rest, os [out-j os], ss [sig-j ss])
   ++  post-checkstate
     |=  [eyre-id=@ta req-body=(unit octs)]
-    ^-  (quip card state-13)
+    ^-  (quip card state-14)
     =/  parsed  (parse-object-body req-body)
     ?:  ?=(%| -.parsed)  :_  st  (give-err eyre-id 400 p.parsed)
     =/  jon  p.parsed
@@ -1927,6 +2032,32 @@
   ::
   ::    Malformed messages produce per-element `{"error": ...}` JSON objects
   ::    rather than crashing the whole batch.
+  ::
+  ::  restore-entries: build NUT-09 restore records (B_ hex -> issued signature)
+  ::  from a batch of blinded messages and the signatures produced for them,
+  ::  index-aligned. Skips error results (no C_) and any missing B_.
+  ++  restore-entries
+    |=  [msgs=(list json) sigs=(list json)]
+    ^-  (map @t restored-sig)
+    =|  out=(map @t restored-sig)
+    |-  ^-  (map @t restored-sig)
+    ?~  msgs  out
+    ?~  sigs  out
+    =/  next-out=(map @t restored-sig)
+      =/  msg=json  i.msgs
+      =/  sig=json  i.sigs
+      ?.  ?=([%o *] msg)  out
+      ?.  ?=([%o *] sig)  out
+      =/  b-hex  (get-str p.msg 'B_')
+      =/  c-hex  (get-str p.sig 'C_')
+      ?:  |(=('' b-hex) =('' c-hex))  out
+      =/  dleq-j  (~(get by p.sig) 'dleq')
+      =/  e-hex=@t  ?.(?=([~ %o *] dleq-j) '' (get-str p.u.dleq-j 'e'))
+      =/  s-hex=@t  ?.(?=([~ %o *] dleq-j) '' (get-str p.u.dleq-j 's'))
+      %+  ~(put by out)  b-hex
+      ^-  restored-sig
+      [(get-num p.sig 'amount') (get-str p.sig 'id') c-hex e-hex s-hex]
+    $(msgs t.msgs, sigs t.sigs, out next-out)
   ::
   ++  sign-outputs
     |=  outputs=(list json)
@@ -2278,7 +2409,7 @@
   ::
   ++  admin-keyset-generate
     |=  eyre-id=@ta
-    ^-  (quip card state-13)
+    ^-  (quip card state-14)
     =/  keys      (gen-ks-keys (shax eny.bowl))
     =/  ks-id=@t  (compute-ks-id pubkeys.keys 'sat' 0 0)
     =/  ks=keyset
@@ -2301,7 +2432,7 @@
   ::
   ++  admin-keyset-activate
     |=  [eyre-id=@ta req-body=(unit octs)]
-    ^-  (quip card state-13)
+    ^-  (quip card state-14)
     =/  parsed  (parse-object-body req-body)
     ?:  ?=(%| -.parsed)  :_(st (give-err eyre-id 400 p.parsed))
     =/  jon  p.parsed
@@ -2321,7 +2452,7 @@
   ::
   ++  admin-keyset-deactivate
     |=  [eyre-id=@ta req-body=(unit octs)]
-    ^-  (quip card state-13)
+    ^-  (quip card state-14)
     =/  parsed  (parse-object-body req-body)
     ?:  ?=(%| -.parsed)  :_(st (give-err eyre-id 400 p.parsed))
     =/  jon  p.parsed
@@ -2339,7 +2470,7 @@
   ::
   ++  admin-keyset-set-fee
     |=  [eyre-id=@ta req-body=(unit octs)]
-    ^-  (quip card state-13)
+    ^-  (quip card state-14)
     =/  parsed  (parse-object-body req-body)
     ?:  ?=(%| -.parsed)  :_(st (give-err eyre-id 400 p.parsed))
     =/  jon  p.parsed
@@ -2393,7 +2524,7 @@
   ::
   ++  admin-ln-configure
     |=  [eyre-id=@ta req-body=(unit octs)]
-    ^-  (quip card state-13)
+    ^-  (quip card state-14)
     =/  parsed  (parse-object-body req-body)
     ?:  ?=(%| -.parsed)  :_(st (give-err eyre-id 400 p.parsed))
     =/  jon  p.parsed
@@ -2425,7 +2556,7 @@
   ::
   ++  admin-ln-test
     |=  eyre-id=@ta
-    ^-  (quip card state-13)
+    ^-  (quip card state-14)
     ?:  ?=([%none ~] ln-config.st)
       :_(st (give-err eyre-id 400 'no-ln-backend'))
     =/  ln  ln-summary
@@ -2444,7 +2575,7 @@
   ::
   ++  admin-quote-delete
     |=  [eyre-id=@ta req-body=(unit octs)]
-    ^-  (quip card state-13)
+    ^-  (quip card state-14)
     =/  parsed  (parse-object-body req-body)
     ?:  ?=(%| -.parsed)  :_(st (give-err eyre-id 400 p.parsed))
     =/  jon  p.parsed
@@ -2489,7 +2620,7 @@
   ::  declared never-to-be-redeemed. Body: {"quote_id": "..."}.
   ++  admin-quote-revoke
     |=  [eyre-id=@ta req-body=(unit octs)]
-    ^-  (quip card state-13)
+    ^-  (quip card state-14)
     =/  parsed  (parse-object-body req-body)
     ?:  ?=(%| -.parsed)  :_(st (give-err eyre-id 400 p.parsed))
     =/  jon  p.parsed
@@ -2529,7 +2660,7 @@
   ::    %none, empty payment-hash, or (MIG-1) a legacy stuck quote with no inflight.
   ++  admin-melt-abort
     |=  [eyre-id=@ta req-body=(unit octs)]
-    ^-  (quip card state-13)
+    ^-  (quip card state-14)
     =/  parsed  (parse-object-body req-body)
     ?:  ?=(%| -.parsed)  :_(st (give-err eyre-id 400 p.parsed))
     =/  jon  p.parsed
@@ -2631,7 +2762,7 @@
   ::
   ++  admin-info-update
     |=  [eyre-id=@ta req-body=(unit octs)]
-    ^-  (quip card state-13)
+    ^-  (quip card state-14)
     =/  parsed  (parse-object-body req-body)
     ?:  ?=(%| -.parsed)  :_(st (give-err eyre-id 400 p.parsed))
     =/  jon  p.parsed
@@ -2658,7 +2789,7 @@
   ::
   ++  admin-update-settings
     |=  [eyre-id=@ta req-body=(unit octs)]
-    ^-  (quip card state-13)
+    ^-  (quip card state-14)
     =/  parsed  (parse-object-body req-body)
     ?:  ?=(%| -.parsed)  :_(st (give-err eyre-id 400 p.parsed))
     =/  jon  p.parsed
@@ -2848,7 +2979,7 @@
   ::
   ++  handle-ln-response
     |=  [wire-id=@ta res=client-response:iris]
-    ^-  (quip card state-13)
+    ^-  (quip card state-14)
     =/  maybe-pend  (~(get by pending.st) wire-id)
     ?~  maybe-pend
       ~&  >>>  [%ecash-ln-response-no-pending wire-id]
@@ -3089,6 +3220,7 @@
       =/  actual-fee=@ud  (routing-fee-sats jon fee-reserve.mq)
       =/  refund=@ud  (sub fee-reserve.mq actual-fee)
       =/  change-sigs=(list json)  (sign-change-outputs outputs.pend refund)
+      =.  restore.st  (~(uni by restore.st) (restore-entries outputs.pend change-sigs))
       =?  melt-change.st  !=(~ change-sigs)
         (~(put by melt-change.st) quote-id.pend change-sigs)
       ::  Settled: the inflight reconciliation record is no longer needed.
@@ -3159,6 +3291,7 @@
           (routing-fee-sats u.maybe-json fee-reserve.mq)
         =/  refund=@ud  (sub fee-reserve.mq actual-fee)
         =/  change-sigs=(list json)  (sign-change-outputs change.inflight refund)
+        =.  restore.st  (~(uni by restore.st) (restore-entries change.inflight change-sigs))
         =?  melt-change.st  !=(~ change-sigs)
           (~(put by melt-change.st) quote-id.pend change-sigs)
         =.  melt-quotes.st
@@ -3261,6 +3394,7 @@
           (routing-fee-sats u.maybe-json fee-reserve.mq)
         =/  refund=@ud  (sub fee-reserve.mq actual-fee)
         =/  change-sigs=(list json)  (sign-change-outputs change.inflight refund)
+        =.  restore.st  (~(uni by restore.st) (restore-entries change.inflight change-sigs))
         =?  melt-change.st  !=(~ change-sigs)
           (~(put by melt-change.st) quote-id.pend change-sigs)
         =.  melt-quotes.st
@@ -3358,6 +3492,7 @@
           (routing-fee-sats u.maybe-json fee-reserve.mq)
         =/  refund=@ud  (sub fee-reserve.mq actual-fee)
         =/  change-sigs=(list json)  (sign-change-outputs change.inflight refund)
+        =.  restore.st  (~(uni by restore.st) (restore-entries change.inflight change-sigs))
         =?  melt-change.st  !=(~ change-sigs)
           (~(put by melt-change.st) quote-id.pend change-sigs)
         =.  melt-quotes.st

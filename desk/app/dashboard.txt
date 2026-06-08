@@ -129,7 +129,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
         </div>
       </div>
       <div class="card">
-        <div class="ch"><span>Active Keyset</span><button class="rbtn" onclick="loadOverview()">Refresh</button></div>
+        <div class="ch"><span>Active Keyset</span><button class="rbtn" data-act="loadOverview">Refresh</button></div>
         <div class="cb" id="ov-keyset"><em class="muted">Loading...</em></div>
       </div>
     </div>
@@ -153,7 +153,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
             <input id="st-ttl" type="number" min="60" placeholder="3600">
             <div class="hint">Default: 3600 (1 hour)</div>
           </div>
-          <button class="btn btn-sm" onclick="updateSettings()">Save</button>
+          <button class="btn btn-sm" data-act="updateSettings">Save</button>
         </div>
         <div class="srow danger">
           <label><input type="checkbox" id="self-enabled"> Enable <code>self</code> mint/melt</label>
@@ -172,8 +172,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
         <div class="ch">
           <span>All Keysets</span>
           <div style="display:flex;gap:6px">
-            <button class="btn btn-sm" onclick="generateKeyset()">Generate New</button>
-            <button class="rbtn" onclick="loadKeysets()">Refresh</button>
+            <button class="btn btn-sm" data-act="generateKeyset">Generate New</button>
+            <button class="rbtn" data-act="loadKeysets">Refresh</button>
           </div>
         </div>
         <div class="cb" id="ks-body"><em class="muted">Loading...</em></div>
@@ -181,7 +181,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
       <div class="res" id="ks-action-res"></div>
     </div>
     <div id="ks-detail-view" style="display:none">
-      <span class="detail-back" onclick="showKeysetList()">&larr; Back to keysets</span>
+      <span class="detail-back" data-act="showKeysetList">&larr; Back to keysets</span>
       <div class="card">
         <div class="ch"><span>Keyset Detail</span></div>
         <div class="cb" id="ks-detail"><em class="muted">Loading...</em></div>
@@ -192,7 +192,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
   <!-- Quotes Tab -->
   <div id="sec-qt" class="sec">
     <div class="card">
-      <div class="ch"><span>All Quotes</span><button class="rbtn" onclick="loadQuotes()">Refresh</button></div>
+      <div class="ch"><span>All Quotes</span><button class="rbtn" data-act="loadQuotes">Refresh</button></div>
       <div class="cb">
         <div class="q-filter" id="qt-filter">
           <button class="on" data-f="all">All</button>
@@ -211,7 +211,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
   <div id="sec-tk" class="sec">
     <div class="split">
       <div class="card">
-        <div class="ch"><span>Spent Tokens</span><button class="rbtn" onclick="loadSpent()">Refresh</button></div>
+        <div class="ch"><span>Spent Tokens</span><button class="rbtn" data-act="loadSpent">Refresh</button></div>
         <div class="cb" id="tk-spent"><em class="muted">Loading...</em></div>
       </div>
       <div class="card">
@@ -221,7 +221,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
             <label>Secret or Y-point (hex)</label>
             <input id="tk-check-input" placeholder="Enter secret string or 02/03... compressed point">
           </div>
-          <button class="btn btn-sm" onclick="checkSpent()">Check</button>
+          <button class="btn btn-sm" data-act="checkSpent">Check</button>
           <div class="res" id="tk-check-res"></div>
         </div>
       </div>
@@ -232,7 +232,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
   <div id="sec-ln" class="sec">
     <div class="split">
       <div class="card">
-        <div class="ch"><span>Current Backend</span><button class="rbtn" onclick="loadLightning()">Refresh</button></div>
+        <div class="ch"><span>Current Backend</span><button class="rbtn" data-act="loadLightning">Refresh</button></div>
         <div class="cb" id="ln-body"><em class="muted">Loading...</em></div>
       </div>
       <div class="card">
@@ -240,7 +240,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
         <div class="cb">
           <div class="fld">
             <label>Backend Type</label>
-            <select id="ln-type" onchange="toggleLnFields()">
+            <select id="ln-type" data-change="toggleLnFields">
               <option value="lnbits">LNbits</option>
               <option value="lnd">LND</option>
               <option value="none">None (disable)</option>
@@ -261,8 +261,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
             </div>
           </div>
           <div style="display:flex;gap:8px;margin-top:4px">
-            <button class="btn btn-sm" onclick="configureLn()">Save</button>
-            <button class="btn btn-sm btn-sec" onclick="testLn()">Test</button>
+            <button class="btn btn-sm" data-act="configureLn">Save</button>
+            <button class="btn btn-sm btn-sec" data-act="testLn">Test</button>
           </div>
           <div class="res" id="ln-config-res"></div>
         </div>
@@ -274,7 +274,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
   <div id="sec-nf" class="sec">
     <div class="split">
       <div class="card">
-        <div class="ch"><span>Mint Information (NUT-06)</span><button class="rbtn" onclick="loadInfo()">Refresh</button></div>
+        <div class="ch"><span>Mint Information (NUT-06)</span><button class="rbtn" data-act="loadInfo">Refresh</button></div>
         <div class="cb" id="nf-body"><em class="muted">Loading...</em></div>
       </div>
       <div class="card">
@@ -288,7 +288,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
             <label>Description</label>
             <input id="nf-desc" placeholder="Cashu ecash mint on Urbit">
           </div>
-          <button class="btn btn-sm" onclick="updateInfo()">Save</button>
+          <button class="btn btn-sm" data-act="updateInfo">Save</button>
           <div class="res" id="nf-res"></div>
         </div>
       </div>
@@ -474,13 +474,13 @@ async function loadOverview(silent) {
       document.getElementById("ov-keyset").innerHTML = `
         <div style="margin-bottom:12px">
           ${badge("Active", "active")}
-          <span class="mono accent" style="margin-left:8px;cursor:pointer" onclick="copyText('${ks.id}')" title="Click to copy">${truncId(ks.id, 24)}</span>
+          <span class="mono accent" style="margin-left:8px;cursor:pointer" data-act="copyText" data-arg="${ks.id}" title="Click to copy">${truncId(ks.id, 24)}</span>
           <span class="muted" style="margin-left:8px">unit: ${ks.unit || 'sat'}</span>
           <span class="muted" style="margin-left:8px">fee: ${ks.input_fee_ppk || 0} ppk</span>
           <span class="muted" style="margin-left:8px">created: ${fmtDate(ks.created)}</span>
         </div>
         <div class="kgrid">
-          ${keys.map(([a,p]) => `<div class="ki" onclick="copyText('${p}')" title="${p}"><div class="ka">${a}</div><div class="kp">${truncId(p,14)}</div></div>`).join("")}
+          ${keys.map(([a,p]) => `<div class="ki" data-act="copyText" data-arg="${p}" title="${p}"><div class="ka">${a}</div><div class="kp">${truncId(p,14)}</div></div>`).join("")}
         </div>
         <div class="hint" style="margin-top:8px">Click denomination to copy public key</div>
       `;
@@ -552,10 +552,10 @@ async function loadKeysets() {
             <td>${k.input_fee_ppk || 0}</td>
             <td class="muted">${fmtDate(k.created)}</td>
             <td style="white-space:nowrap">
-              <button class="rbtn" onclick="viewKeyset('${k.id}')">View</button>
+              <button class="rbtn" data-act="viewKeyset" data-arg="${k.id}">View</button>
               ${k.active
                 ? ''
-                : `<button class="rbtn" style="color:#34d399;border-color:#065f46" onclick="activateKeyset('${k.id}')">Activate</button>`}
+                : `<button class="rbtn" style="color:#34d399;border-color:#065f46" data-act="activateKeyset" data-arg="${k.id}">Activate</button>`}
             </td>
           </tr>`).join("")}
         </tbody>
@@ -628,7 +628,7 @@ async function viewKeyset(id) {
       <div style="margin-bottom:16px">
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap">
           ${ks.active ? badge('Active', 'active') : badge('Inactive', 'inactive')}
-          <span class="mono muted" style="font-size:.75rem;cursor:pointer" onclick="copyText('${ks.id}')" title="Click to copy full ID">${ks.id}</span>
+          <span class="mono muted" style="font-size:.75rem;cursor:pointer" data-act="copyText" data-arg="${ks.id}" title="Click to copy full ID">${ks.id}</span>
         </div>
         <div class="muted" style="font-size:.82rem;margin-bottom:12px">
           Unit: ${ks.unit || 'sat'} &middot; Fee: ${ks.input_fee_ppk || 0} ppk &middot; Created: ${fmtDate(ks.created)}
@@ -636,8 +636,8 @@ async function viewKeyset(id) {
         <div style="display:flex;gap:6px;flex-wrap:wrap">
           ${ks.active
             ? ''
-            : `<button class="btn btn-sm" style="background:#065f46;color:#34d399" onclick="activateKeyset('${ks.id}')">Activate</button>`}
-          <button class="btn btn-sm btn-sec" onclick="setKeysetFee('${ks.id}', ${ks.input_fee_ppk || 0})">Set Fee</button>
+            : `<button class="btn btn-sm" style="background:#065f46;color:#34d399" data-act="activateKeyset" data-arg="${ks.id}">Activate</button>`}
+          <button class="btn btn-sm btn-sec" data-act="setKeysetFee" data-arg="${ks.id}" data-arg2="${ks.input_fee_ppk || 0}">Set Fee</button>
         </div>
       </div>
       <div style="margin-bottom:8px;font-weight:600;font-size:.85rem">Public Keys (${keys.length} denominations)</div>
@@ -647,7 +647,7 @@ async function viewKeyset(id) {
           ${keys.map(([a,p]) => `<tr>
             <td><strong class="accent">${a}</strong></td>
             <td class="mono" style="font-size:.72rem">${p}</td>
-            <td><button class="rbtn" onclick="copyText('${p}')">Copy</button></td>
+            <td><button class="rbtn" data-act="copyText" data-arg="${p}">Copy</button></td>
           </tr>`).join("")}
         </tbody>
       </table>
@@ -704,13 +704,13 @@ function renderQuotes() {
           const canDelete = !(q._type === 'mint' && q.state === 'ISSUED') && !(q._type === 'melt' && q.state === 'PAID');
           return `<tr>
             <td>${badge(q._type, q._type === 'mint' ? 'active' : 'pending')}</td>
-            <td class="mono" style="cursor:pointer" onclick="copyText('${q.quote}')" title="${q.quote}">${truncId(q.quote, 16)}</td>
+            <td class="mono" style="cursor:pointer" data-act="copyText" data-arg="${q.quote}" title="${q.quote}">${truncId(q.quote, 16)}</td>
             <td><strong>${q.amount || '?'}</strong> sats</td>
             <td>${badge(q.state, stClass)}</td>
             <td>${q.method || '?'}</td>
             <td class="muted">${fmtDate(q.created)}</td>
             <td>${q.expired ? badge('Yes', 'expired') : '<span class="muted">No</span>'}</td>
-            <td>${canDelete ? `<button class="rbtn" style="color:#fca5a5;border-color:#7f1d1d" onclick="deleteQuote('${q.quote}','${q._type}')">Delete</button>` : ''}</td>
+            <td>${canDelete ? `<button class="rbtn" style="color:#fca5a5;border-color:#7f1d1d" data-act="deleteQuote" data-arg="${q.quote}" data-arg2="${q._type}">Delete</button>` : ''}</td>
           </tr>`;
         }).join("")}
       </tbody>
@@ -808,7 +808,7 @@ async function loadLightning() {
           </tbody>
         </table>
         <div style="margin-top:12px">
-          <button class="btn btn-sm btn-danger" onclick="clearLn()">Remove Backend</button>
+          <button class="btn btn-sm btn-danger" data-act="clearLn">Remove Backend</button>
         </div>
       `;
       // Pre-fill form with current values
@@ -985,6 +985,31 @@ document.querySelectorAll("#main-tabs .tab").forEach(btn => {
     if (t === 'ln') await loadLightning();
     if (t === 'nf') await loadInfo();
   });
+});
+
+// Event delegation: CSP blocks inline on*= handlers, so elements carry data-act
+// (+ optional data-arg/data-arg2) and we resolve them to functions here. Args are
+// data, never code — strictly safer than the old inline onclick handlers.
+const ACTIONS = {
+  loadOverview, updateSettings, generateKeyset, loadKeysets, showKeysetList,
+  loadQuotes, loadSpent, checkSpent, loadLightning, toggleLnFields, configureLn,
+  testLn, loadInfo, updateInfo, clearLn, copyText, viewKeyset, activateKeyset,
+  setKeysetFee, deleteQuote,
+};
+document.addEventListener('click', (e) => {
+  const el = e.target.closest('[data-act]');
+  if (!el) return;
+  const fn = ACTIONS[el.dataset.act];
+  if (!fn) return;
+  if ('arg2' in el.dataset) fn(el.dataset.arg, el.dataset.arg2);
+  else if ('arg' in el.dataset) fn(el.dataset.arg);
+  else fn();
+});
+document.addEventListener('change', (e) => {
+  const el = e.target.closest('[data-change]');
+  if (!el) return;
+  const fn = ACTIONS[el.dataset.change];
+  if (fn) fn();
 });
 
 init();

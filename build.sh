@@ -64,16 +64,22 @@ sync_deps() {
   echo "Preparing dist/ and dist-services/..."
   rm -rf dist dist-services
   mkdir -p dist dist-services
-  cp -r desk/* dist/
-  if [[ -d desk-services ]]; then
-    cp -r desk-services/* dist-services/
-  fi
 
+  # Pull base-dev deps FIRST, into the empty dirs, so peru only ever manages its
+  # own files — otherwise a mark we also ship (mar/txt) looks "modified" to peru
+  # on the second run and it aborts.
   echo "Running peru sync..."
   if ! peru sync 2>&1; then
     echo "Error: peru sync failed. Cleaning up..." >&2
     rm -rf dist dist-services
     exit 1
+  fi
+
+  # ...then overlay our desk files on top (ours win for any shared mark).
+  echo "Overlaying desk files..."
+  cp -r desk/* dist/
+  if [[ -d desk-services ]]; then
+    cp -r desk-services/* dist-services/
   fi
 }
 

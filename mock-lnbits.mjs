@@ -57,7 +57,7 @@ const server = http.createServer(async (req, res) => {
       const payHash = crypto.randomBytes(32).toString('hex');
       const preimage = crypto.randomBytes(32).toString('hex');
       payments.set(payHash, {bolt11, paid: true, preimage});
-      res.writeHead(200);
+      res.writeHead(201);  // real LNbits returns 201 Created on pay
       res.end(JSON.stringify({
         payment_hash: payHash,
         checking_id: payHash,
@@ -73,7 +73,7 @@ const server = http.createServer(async (req, res) => {
     const checkingId = crypto.randomBytes(32).toString('hex');
     const bolt11 = fakeBolt11(amount);
     invoices.set(checkingId, {amount, memo, bolt11, paid: false});
-    res.writeHead(200);
+    res.writeHead(201);  // real LNbits returns 201 Created on invoice creation
     res.end(JSON.stringify({
       payment_hash: checkingId,
       checking_id: checkingId,

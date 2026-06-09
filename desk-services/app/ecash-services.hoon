@@ -131,6 +131,10 @@
   ::  max outputs accepted per issue request (bounds per-event EC work)
   ++  max-batch  ^-  @ud  100
   ::
+  ::  max raw request-body bytes accepted BEFORE the JSON decode (pre-cap DoS:
+  ::  de:json allocates the whole body on one serial event).
+  ++  max-body-bytes  ^-  @ud  1.048.576
+  ::
   ::  host-of-url: extract host[:port] authority from an Origin/Referer url.
   ++  host-of-url
     |=  url=@t
@@ -163,6 +167,7 @@
   ::  -- JSON number parsing (bare digits, no Hoon dot separators) --
   ++  parse-ud
     |=  t=@t  ^-  @ud
+    ?:  (gth (met 3 t) 20)  0
     =/  res  (rust (trip t) (bass 10 (plus dit)))
     ?~(res 0 u.res)
   ::
@@ -176,6 +181,7 @@
     |=  body=(unit octs)
     ^-  (each json @t)
     ?~  body  [%| 'no-body']
+    ?:  (gth p.u.body max-body-bytes)  [%| 'body-too-large']
     =/  parsed=(unit json)  (de:json:html (crip (trip q.u.body)))
     ?~  parsed               [%| 'invalid-json']
     ?.  ?=([%o *] u.parsed)  [%| 'expected-object']
@@ -252,13 +258,20 @@
   ++  service-issue
     |=  [svc=service outputs=(list json)]
     ^-  (each [sigs=(list json) new=service] @t)
-    ?:  ?&  ?=(^ max-issuance.svc)
-            (gth (add issued.svc (lent outputs)) u.max-issuance.svc)
-        ==
-      [%| 'service-issuance-cap-reached']
     =/  stamped=(list json)  (stamp-ks-id outputs ks-id.svc)
     =/  sigs=(list json)     (cred-sign-outputs-as stamped %.y)
-    =/  new-svc=service      svc(issued (add issued.svc (lent outputs)))
+    ::  Count only outputs that received a real signature: per-element error
+    ::  objects carry an 'error' key (no C_). Junk outputs must not consume the
+    ::  issuance cap or inflate `issued`.
+    =/  ok=@ud
+      %-  lent
+      %+  skip  sigs
+      |=(j=json &(?=([%o *] j) (has-key p.j 'error')))
+    ?:  ?&  ?=(^ max-issuance.svc)
+            (gth (add issued.svc ok) u.max-issuance.svc)
+        ==
+      [%| 'service-issuance-cap-reached']
+    =/  new-svc=service      svc(issued (add issued.svc ok))
     [%& [sigs new-svc]]
   ::
   ::  service-check: verify proofs against a specific service's keyset.
@@ -279,7 +292,7 @@
       |-
       ?~  raw  ~
       ?~  scoped  ~
-      :-  [secret.i.raw &(valid.i.raw i.scoped) spent.i.raw]
+      :-  [secret.i.raw &(valid.i.raw i.scoped) &(spent.i.raw i.scoped)]
       $(raw t.raw, scoped t.scoped)
     combined
   ::
@@ -666,7 +679,9 @@
     ?:  (gth (lent outputs) max-batch)  :_(st (give-err eyre-id 400 'batch-too-large'))
     ?:  (has-dup-x outputs)  :_(st (give-err eyre-id 400 'duplicate-output'))
     =/  sigs=(list json)  (cred-sign-outputs outputs)
-    =.  cred-counter.st  (add cred-counter.st (lent outputs))
+    =.  cred-counter.st
+      %+  add  cred-counter.st
+      (lent (skip sigs |=(j=json &(?=([%o *] j) (has-key p.j 'error')))))
     :_  st
     %-  give-json  :_  eyre-id
     (pairs:enjs:format ['signatures' [%a sigs]]~)
@@ -681,6 +696,7 @@
     ?>  ?=([%o *] jon)
     ?.  (has-key p.jon 'proofs')  (give-err eyre-id 400 'missing-proofs')
     =/  proofs  (get-array p.jon 'proofs')
+    ?:  (gth (lent proofs) max-batch)  (give-err eyre-id 400 'batch-too-large')
     =/  results  (cred-check-proofs proofs %.n)
     =/  result-json=(list json)
       %+  turn  results
@@ -703,6 +719,7 @@
     ?>  ?=([%o *] jon)
     ?.  (has-key p.jon 'proofs')  :_(st (give-err eyre-id 400 'missing-proofs'))
     =/  proofs  (get-array p.jon 'proofs')
+    ?:  (gth (lent proofs) max-batch)  :_(st (give-err eyre-id 400 'batch-too-large'))
     =/  results  (cred-check-proofs proofs %.n)
     =/  all-valid  (levy results |=([k=@t s=@t v=? sp=?] &(v !sp)))
     ?.  all-valid
@@ -875,7 +892,9 @@
     =/  res  (service-issue svc outputs)
     ?:  ?=(%| -.res)  :_  st  (give-err eyre-id 400 p.res)
     =.  services.st     (~(put by services.st) name new.p.res)
-    =.  cred-counter.st  (add cred-counter.st (lent outputs))
+    =.  cred-counter.st
+      %+  add  cred-counter.st
+      (lent (skip sigs.p.res |=(j=json &(?=([%o *] j) (has-key p.j 'error')))))
     :_  st
     %-  give-json  :_  eyre-id
     (pairs:enjs:format ['signatures' [%a sigs.p.res]]~)
@@ -894,6 +913,7 @@
     ?>  ?=([%o *] jon)
     ?.  (has-key p.jon 'proofs')  (give-err eyre-id 400 'missing-proofs')
     =/  proofs  (get-array p.jon 'proofs')
+    ?:  (gth (lent proofs) max-batch)  (give-err eyre-id 400 'batch-too-large')
     =/  results  (service-check svc proofs)
     =/  result-json=(list json)
       %+  turn  results
@@ -933,6 +953,7 @@
     ?>  ?=([%o *] jon)
     ?.  (has-key p.jon 'proofs')  :_  st  (give-err eyre-id 400 'missing-proofs')
     =/  proofs   (get-array p.jon 'proofs')
+    ?:  (gth (lent proofs) max-batch)  :_  st  (give-err eyre-id 400 'batch-too-large')
     =/  results  (service-check svc proofs)
     ?:  (lien results |=([s=@t v=? sp=?] !v))
       :_  st  (give-err eyre-id 400 'invalid-service-token')

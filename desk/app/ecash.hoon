@@ -271,9 +271,15 @@
       =?  prev  ?=(%12 -.prev)  (state-12-to-13 prev)
       =?  prev  ?=(%13 -.prev)  (state-13-to-14 prev)
       ?>  ?=(%14 -.prev)
-      ::  Do NOT arm /cleanup here: on-init arms it once and on-arvo re-arms
-      ::  after each fire, so arming on every upgrade leaks timers (LOW-6).
-      [~ this(state prev)]
+      ::  Re-arm /cleanup idempotently. The timer fires at a CANONICAL time (the
+      ::  next ~d1 boundary), so %rest+%wait at that exact time cancels any
+      ::  existing timer and re-arms exactly one — no per-upgrade leak (LOW-6),
+      ::  and it self-heals if a prior cleanup wake was ever lost.
+      =/  next=@da  (add ~d1 (mul ~d1 (div now.bowl ~d1)))
+      :_  this(state prev)
+      :~  [%pass /cleanup %arvo %b %rest next]
+          [%pass /cleanup %arvo %b %wait next]
+      ==
   ::
   ++  state-6-to-7
     |=  prev=state-6
@@ -579,7 +585,7 @@
       [%cleanup ~]
     ?>  ?=(%behn -.sign-arvo)
     :_  this(state run-cleanup:hc)
-    :~  [%pass /cleanup %arvo %b %wait (add now.bowl ~d1)]
+    :~  [%pass /cleanup %arvo %b %wait (add ~d1 (mul ~d1 (div now.bowl ~d1)))]
     ==
   ==
 ++  on-fail   on-fail:def
@@ -592,6 +598,9 @@
   ::  -- JSON number parsing (bare digits, no Hoon dot separators) --
   ++  parse-ud
     |=  t=@t  ^-  @ud
+    ::  DoS: reject absurd digit runs before the O(n^2) bignum build. Sat
+    ::  amounts never exceed ~10 digits; 20 is generous headroom.
+    ?:  (gth (met 3 t) 20)  0
     =/  res  (rust (trip t) (bass 10 (plus dit)))
     ?~(res 0 u.res)
   ::
@@ -600,10 +609,22 @@
   ++  parse-ud-strict
     |=  t=@t  ^-  (unit @ud)
     ?:  =('' t)  ~
+    ?:  (gth (met 3 t) 20)  ~
     (rust (trip t) (bass 10 (plus dit)))
   ::
   ::  max inputs or outputs accepted per request (bounds per-event EC work)
   ++  max-batch  ^-  @ud  100
+  ::
+  ::  max raw request-body bytes accepted BEFORE the JSON decode. de:json
+  ::  allocates the whole body on one serial event, so an unbounded body is a
+  ::  pre-cap DoS; reject oversized bodies cheaply first. ~1 MiB is ample for a
+  ::  max-batch P2PK batch with witnesses.
+  ++  max-body-bytes  ^-  @ud  1.048.576
+  ::
+  ::  max P2PK witness sigs / pubkeys per proof — bounds the O(n*m) schnorr
+  ::  verify in count-valid-sigs. Honest n-of-m multisig is far below this;
+  ::  worst-case per-event work grows with the square of this cap.
+  ++  max-p2pk-keys  ^-  @ud  10
   ::
   ::  max admin-settable per-proof input fee (ppk); guards swap/melt sub
   ++  max-input-fee-ppk  ^-  @ud  100.000
@@ -715,6 +736,7 @@
     |=  body=(unit octs)
     ^-  (each json @t)
     ?~  body  [%| 'no-body']
+    ?:  (gth p.u.body max-body-bytes)  [%| 'body-too-large']
     =/  parsed=(unit json)  (de:json:html (crip (trip q.u.body)))
     ?~  parsed               [%| 'invalid-json']
     ?.  ?=([%o *] u.parsed)  [%| 'expected-object']
@@ -938,7 +960,7 @@
     :_  st
     :~  [%pass /eyre/connect %arvo %e %connect [`/apps/ecash dap.bowl]]
         [%pass /eyre/connect-v1 %arvo %e %connect [`/v1 dap.bowl]]
-        [%pass /cleanup %arvo %b %wait (add now.bowl ~d1)]
+        [%pass /cleanup %arvo %b %wait (add ~d1 (mul ~d1 (div now.bowl ~d1)))]
     ==
   ::  parse-request-path: url cord -> list of path segments (query stripped)
   ::
@@ -1943,6 +1965,11 @@
   ++  count-valid-sigs
     |=  [sigs=(list @t) pks=(list @t) msg=@]
     ^-  @ud
+    ::  P2PK-DoS: bound the O(|sigs|*|pks|) schnorr-verify. An honest n-of-m
+    ::  uses a handful of keys; an oversized witness or pubkey list is abuse,
+    ::  so report 0 satisfied signers (spend fails) without grinding the event.
+    ?:  ?|((gth (lent sigs) max-p2pk-keys) (gth (lent pks) max-p2pk-keys))
+      0
     =/  real-sigs=(list @t)  (skip sigs |=(s=@t =('' s)))
     ::  dedup on the canonical x-only key, not the full compressed cord, so a
     ::  02<x>/03<x> parity twin cannot satisfy two slots of an n-of-m threshold
@@ -2125,21 +2152,28 @@
     ?:  =(idx n)  (flop acc)
     =/  amt=@ud  (snag idx amounts)
     =/  msg=json  (snag idx outputs)
-    ?.  ?=([%o *] msg)  $(idx +(idx))
+    ::  POSITION-PRESERVING: emit an error placeholder (no C_) instead of
+    ::  silently skipping an unsignable output. restore-entries and the
+    ::  wallet's NUT-08 change both match B_<->sig by index, so a dropped
+    ::  entry would shift every later sig onto the wrong output. Honest
+    ::  melts never hit these branches, so the change array is unchanged.
+    ?.  ?=([%o *] msg)
+      $(idx +(idx), acc [(pairs:enjs:format ['error' s+'invalid-msg']~) acc])
     =/  b-hex=@t  (get-str p.msg 'B_')
-    ?:  =('' b-hex)  $(idx +(idx))
+    ?:  =('' b-hex)
+      $(idx +(idx), acc [(pairs:enjs:format ['error' s+'missing-B_']~) acc])
     =/  maybe-b-pt  (hex-to-pt b-hex)
     ?~  maybe-b-pt
-      $(idx +(idx))
+      $(idx +(idx), acc [(pairs:enjs:format ['error' s+'invalid-B_-point']~) acc])
     =/  b-=point  u.maybe-b-pt
     =/  kid=@t  active-keyset.st
     =/  maybe-ks  (~(get by keysets.st) kid)
     ?~  maybe-ks
-      $(idx +(idx))
+      $(idx +(idx), acc [(pairs:enjs:format ['error' s+'unknown-keyset']~) acc])
     =/  ks  u.maybe-ks
     =/  maybe-priv  (~(get by privkeys.ks) amt)
     ?~  maybe-priv
-      $(idx +(idx))
+      $(idx +(idx), acc [(pairs:enjs:format ['error' s+'unknown-denomination']~) acc])
     =/  priv=@  u.maybe-priv
     =/  c-=point  (blind-sign b- priv)
     =/  c-hex=@t  (pt-to-hex c-)
@@ -2487,29 +2521,37 @@
       :_(st (give-err eyre-id 400 'input_fee_ppk-too-large'))
     =/  maybe-ks  (~(get by keysets.st) target-id)
     ?~  maybe-ks  :_(st (give-err eyre-id 404 'keyset-not-found'))
-    =/  new-ks-id=@t  (compute-ks-id keys.u.maybe-ks unt.u.maybe-ks new-fee 0)
     =/  was-active=?  =(target-id active-keyset.st)
-    ::  No-op: fee unchanged (the id commits to the fee) so the id is identical.
-    ?:  =(new-ks-id target-id)
-      =.  keysets.st
-        (~(put by keysets.st) target-id u.maybe-ks(input-fee-ppk new-fee))
+    ::  No-op: fee unchanged, so there is nothing to fork.
+    ?:  =(new-fee input-fee-ppk.u.maybe-ks)
       :_  st
       %-  give-json  :_  eyre-id
       %-  pairs:enjs:format
       :~  ['old_id' s+target-id]
-          ['new_id' s+new-ks-id]
+          ['new_id' s+target-id]
           ['input_fee_ppk' (numb:enjs:format new-fee)]
       ==
+    ::  A fee change ROTATES to a fresh keyset (new keys, new id) and retains
+    ::  the old id as an INACTIVE alias so already-issued tokens that carry it
+    ::  still resolve in verify-proofs / compute-fee. The new keyset gets FRESH
+    ::  key material — NOT a copy of the old keys: BDHKE never binds the keyset
+    ::  id into a signature, so a copied-key fork would let a token verify under
+    ::  EITHER id and be relabeled to the lower-fee twin to dodge the input fee.
+    ::  Distinct keys close that (a token only verifies under its own id).
+    =/  fresh  (gen-ks-keys (shax eny.bowl))
+    =/  new-ks-id=@t  (compute-ks-id pubkeys.fresh unt.u.maybe-ks new-fee 0)
     ::  Refuse to clobber an unrelated keyset that already owns new-ks-id.
     ?:  (~(has by keysets.st) new-ks-id)
       :_(st (give-err eyre-id 409 'keyset-id-collision'))
-    ::  RETAIN the old id as an INACTIVE alias (keeping its OLD fee/id) so
-    ::  already-issued tokens that carry it still resolve in verify-proofs /
-    ::  compute-fee. Add the new-id entry with the new fee, active iff the
-    ::  target was active. Changing the fee forks the keyset; it never bricks
-    ::  outstanding tokens.
     =/  new-ks=keyset
-      u.maybe-ks(input-fee-ppk new-fee, ks-id new-ks-id, active was-active)
+      %=  u.maybe-ks
+        input-fee-ppk  new-fee
+        ks-id          new-ks-id
+        active         was-active
+        keys           pubkeys.fresh
+        privkeys       privkeys.fresh
+        created        now.bowl
+      ==
     =.  keysets.st  (~(put by keysets.st) target-id u.maybe-ks(active %.n))
     =.  keysets.st  (~(put by keysets.st) new-ks-id new-ks)
     =?  active-keyset.st  was-active  new-ks-id
@@ -2799,7 +2841,9 @@
     ?>  ?=([%o *] jon)
     =?  fee-reserve-pct.st  (has-key p.jon 'fee_reserve_pct')  (get-num p.jon 'fee_reserve_pct')
     =?  fee-reserve-min.st  (has-key p.jon 'fee_reserve_min')  (get-num p.jon 'fee_reserve_min')
-    =?  quote-ttl-secs.st   (has-key p.jon 'quote_ttl_secs')   (get-num p.jon 'quote_ttl_secs')
+    ::  floor the TTL at 60s: it also drives the bolt11 invoice expiry (M2), so
+    ::  a 0 / tiny value would mint instant-expiry, unpayable invoices.
+    =?  quote-ttl-secs.st   (has-key p.jon 'quote_ttl_secs')   (max 60 (get-num p.jon 'quote_ttl_secs'))
     =?  self-method-enabled.st  (has-key p.jon 'self_method_enabled')
       (get-bool p.jon 'self_method_enabled')
     :_  st
@@ -2827,6 +2871,10 @@
         :~  ['out' b+%.n]
             ['amount' (numb:enjs:format amount)]
             ['memo' s+memo]
+            ::  M2: invoice expiry == quote TTL, so the bolt11 becomes unpayable
+            ::  at the same instant run-cleanup may prune the quote — closes the
+            ::  pay-after-prune window (mint gaining unbacked sats).
+            ['expiry' (numb:enjs:format quote-ttl-secs.st)]
         ==
       :*  %'POST'
           (crip (weld (trip url.ln-config.st) "/api/v1/payments"))
@@ -2842,6 +2890,7 @@
         %-  pairs:enjs:format
         :~  ['value' (numb:enjs:format amount)]
             ['memo' s+memo]
+            ['expiry' (numb:enjs:format quote-ttl-secs.st)]
         ==
       :*  %'POST'
           (crip (weld (trip url.ln-config.st) "/v1/invoices"))
@@ -3176,6 +3225,51 @@
             !=('' (extract-str u.maybe-json 'payment_preimage' 'preimage'))
             =('' (extract-str u.maybe-json 'payment_error' 'error'))
         ==
+      ::  M1: DEFINITIVE dispatch rejection. A terminal 4xx client error (but
+      ::  not 408/429, which are retryable) carrying NO checking_id means LNbits
+      ::  refused the pay before any HTLC existed, so the burned inputs were
+      ::  never at risk — roll them back instead of stranding the quote %pending
+      ::  until a manual abort. Gated on %pending + a present inflight record so
+      ::  a late/duplicate response can never double-act. NOT applied to 5xx /
+      ::  empty body / 2xx-without-preimage (those stay AMBIGUOUS -> %pending).
+      =/  maybe-inflight  (~(get by melt-inflight.st) quote-id.pend)
+      =/  dispatch-rejected=?
+        ?&  ?=(%lnbits -.ln-config.st)
+            (gte status 400)
+            (lth status 500)
+            !=(408 status)
+            !=(429 status)
+            ?=(^ maybe-json)
+            ?=([%o *] u.maybe-json)
+            =('' (extract-str u.maybe-json 'payment_hash' 'checking_id'))
+            ::  require a recognizable LNbits error body (e.g. {"detail": ...})
+            ::  so an OPAQUE proxy/gateway 4xx without one stays %pending.
+            !=('' (extract-str u.maybe-json 'detail' 'error'))
+        ==
+      ?:  &(dispatch-rejected =(%pending state.mq) ?=(^ maybe-inflight))
+        ~&  >>>  [%ecash-ln-pay-dispatch-rejected quote-id.pend status]
+        =/  inflight  u.maybe-inflight
+        =.  spent.st     (~(dif in spent.st) secrets.inflight)
+        =.  spent-ys.st  (~(dif in spent-ys.st) ys.inflight)
+        =.  total-redeemed-sats.st
+          ?:  (gte total-redeemed-sats.st input-total.inflight)
+            (sub total-redeemed-sats.st input-total.inflight)
+          0
+        =.  melt-quotes.st  (~(put by melt-quotes.st) quote-id.pend mq(state %failed))
+        =.  melt-inflight.st  (~(del by melt-inflight.st) quote-id.pend)
+        :_  st
+        %-  give-json  :_  eyre-id.pend
+        %-  pairs:enjs:format
+        :~  ['quote' s+quote-id.pend]
+            ['amount' (numb:enjs:format amount.mq)]
+            ['request' s+request.mq]
+            ['fee_reserve' (numb:enjs:format fee-reserve.mq)]
+            ['unit' s+unt.mq]
+            ['state' s+'UNPAID']
+            ['payment_preimage' s+'']
+            ['expiry' (numb:enjs:format (da-to-unix expiry.mq))]
+            ['change' [%a ~]]
+        ==
       ?.  pre-settled
         ::  Dispatched but settlement unconfirmed (201 in-flight, empty body,
         ::  non-2xx, or carries an error). Stay %pending; the client re-polls.
@@ -3398,7 +3492,7 @@
       ::  SETTLED-NOT-ABORTED: LN shows the pay settled and the quote is still
       ::  %pending (MIG-3). Do NOT roll back; SETTLE instead (sign NUT-08 change,
       ::  store preimage, %paid, clear inflight). Fixes MELT-2's loss-on-abort.
-      ?:  &(is-settled !=('' resp-preimage) =(%pending state.mq))
+      ?:  &(is-settled =(%pending state.mq))
         =/  inflight
           ?~  maybe-inflight  *melt-inflight-entry
           u.maybe-inflight
@@ -3496,7 +3590,7 @@
         (extract-str u.maybe-json 'preimage' 'payment_preimage')
       =/  maybe-inflight  (~(get by melt-inflight.st) quote-id.pend)
       ::  SETTLED-NOT-ABORTED: never lose a settled pay, even under force.
-      ?:  &(is-settled !=('' resp-preimage) =(%pending state.mq))
+      ?:  &(is-settled =(%pending state.mq))
         =/  inflight
           ?~  maybe-inflight  *melt-inflight-entry
           u.maybe-inflight

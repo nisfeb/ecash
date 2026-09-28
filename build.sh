@@ -9,6 +9,7 @@
 #
 # Requires peru (https://github.com/buildinspace/peru) to pull the shared
 # base-dev dependencies (default-agent, dbug, the standard marks).
+set -euo pipefail
 
 COPY_PATH=""
 COMMAND=""
@@ -16,7 +17,7 @@ COMMAND=""
 while [[ $# -gt 0 ]]; do
   case $1 in
     -p)
-      if [[ -z "$2" ]]; then
+      if [[ -z "${2:-}" ]]; then
         echo "Error: -p flag requires a filepath argument" >&2
         exit 1
       fi
@@ -59,7 +60,7 @@ sync_deps() {
   # Regenerate the shared crypto for the services desk (single source of truth
   # is desk/lib; these copies are gitignored).
   mkdir -p desk-services/lib
-  cp desk/lib/curve.hoon desk/lib/bdhke.hoon desk-services/lib/
+  cp desk/lib/curve.hoon desk/lib/bdhke.hoon desk/lib/ecash-http.hoon desk-services/lib/
 
   echo "Preparing dist/ and dist-services/..."
   rm -rf dist dist-services
@@ -94,6 +95,13 @@ copy_to_path() {
 
   if [[ ! -d "$target_path" ]]; then
     echo "Error: target path '$target_path' does not exist (mount the desk first)." >&2
+    exit 1
+  fi
+
+  # -p wipes the target, so it must be a mounted desk (a pier, a home dir
+  # or a typo would be emptied): every desk carries sys.kelvin
+  if [[ ! -f "$target_path/sys.kelvin" ]]; then
+    echo "Error: '$target_path' has no sys.kelvin; is it a mounted desk?" >&2
     exit 1
   fi
 

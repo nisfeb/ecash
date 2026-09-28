@@ -1,38 +1,29 @@
 ::  /lib/bdhke/hoon
-::  Blind Diffie-Hellman Key Exchange for Cashu NUT-00
-::  Uses secp256k1 from zuse (jetted) via lib/curve.hoon
+::  Blind Diffie-Hellman Key Exchange for Cashu NUT-00, DLEQ proofs
+::  (NUT-12) and BIP-340 verification (NUT-11), on lib/curve.hoon.
 ::
 /+  *curve
 |%
 ::
 ::  -- Hash-to-Curve -----------------------------------------
 ::
-::  Cashu NUT-00 spec: find a valid curve point from a message.
-::  Tries SHA256("Secp256k1_HashToCurve_" || SHA256(msg) || counter)
-::  as x-coordinate (prefix 0x02) until a valid point is found.
-::
+::  Cashu NUT-00:
+::   1. msg_hash = SHA256("Secp256k1_HashToCurve_Cashu_" || message)
+::   2. x = SHA256(msg_hash || counter as 4 little-endian bytes), big-endian
+::   3. the point 02||x if it is on the curve, else counter+1 and retry
+::  shay (explicit-length SHA256) keeps trailing zero bytes; rev turns
+::  the little-endian digest atom into the big-endian x.
 ++  hash-to-curve
-  ::  hash-to-curve: maps a secret to a secp256k1 point deterministically.
-  ::  Cashu NUT-00 standard algorithm:
-  ::   1. msg_hash = SHA256(DOMAIN_SEPARATOR || message)
-  ::   2. x = SHA256(msg_hash || counter_LE_4bytes) as BE integer
-  ::   3. Try compressed point 02||x; increment counter if invalid
-  ::  Uses shay (explicit-length SHA256) to preserve trailing zero bytes
-  ::  and rev to convert LE atom to standard BE x-coordinate.
   |=  msg=@  ^-  point
   =/  domain-sep  'Secp256k1_HashToCurve_Cashu_'
   =/  dlen  (met 3 domain-sep)
   =/  mlen  (met 3 msg)
-  ::  Step 1: msg-hash = SHA256(domain-sep || msg)
-  =/  step1  (can 3 ~[[dlen domain-sep] [mlen msg]])
-  =/  msg-hash  (shay (add dlen mlen) step1)
+  =/  msg-hash  (shay (add dlen mlen) (can 3 ~[[dlen domain-sep] [mlen msg]]))
   =/  counter=@  0
   |-  ^-  point
-  ::  Step 2: h = SHA256(msg-hash || counter_LE)
-  =/  step2  (can 3 ~[[32 (add (bex 256) msg-hash)] [4 (add (bex 32) counter)]])
-  =/  h  (rev 3 32 (shay 36 step2))
-  =/  maybe-pt  (hex-to-pt (crip (weld "02" (trip (pad-hex h 64)))))
-  ?^  maybe-pt  u.maybe-pt
+  =/  h  (rev 3 32 (shay 36 (can 3 ~[[32 msg-hash] [4 counter]])))
+  =/  pt  (lift-x h &)
+  ?^  pt  u.pt
   $(counter +(counter))
 ::
 ::  -- BDHKE Core --------------------------------------------
@@ -70,13 +61,9 @@
   |=  [amount=@ud keyset-id=@t eny=@]
   ^-  [b-hex=@t secret=@t blinding-factor=@]
   =/  secret=@t  (pad-hex (shax eny) 64)
-  =/  r=@  (shax (cat 3 eny 'blind'))
-  =/  [b-prime=point blinding-factor=@]  (blind-message secret r)
-  =/  b-hex=@t  (pt-to-hex b-prime)
-  =/  check  (mule |.((hex-to-pt b-hex)))
-  ?.  ?=([%& *] check)
-    $(eny (shax (cat 3 eny 'retry')))
-  [b-hex secret blinding-factor]
+  =/  [b-prime=point blinding-factor=@]
+    (blind-message secret (shax (cat 3 eny 'blind')))
+  [(pt-to-hex b-prime) secret blinding-factor]
 ::
 ::  Split amount into powers of 2 (standard Cashu denominations)
 ++  split-amount
@@ -91,6 +78,24 @@
   ?:  =((mod (div total (bex bit)) 2) 1)
     $(bit +(bit), acc [(bex bit) acc])
   $(bit +(bit))
+::
+::  has-dup-x: do two B_ in a batch share an x-coordinate? That is the
+::  B_/-B_ DLEQ nonce-reuse attack shape (same x, negated y). Malformed or
+::  missing B_ are skipped here; callers reject them on their own.
+++  has-dup-x
+  |=  outputs=(list json)
+  ^-  ?
+  =|  seen=(set @)
+  |-  ^-  ?
+  ?~  outputs  %.n
+  =/  msg  i.outputs
+  ?.  ?=([%o *] msg)  $(outputs t.outputs)
+  =/  b  (~(get by p.msg) 'B_')
+  ?.  ?=([~ %s *] b)  $(outputs t.outputs)
+  =/  mb  (hex-to-pt p.u.b)
+  ?~  mb  $(outputs t.outputs)
+  ?:  (~(has in seen) x.u.mb)  %.y
+  $(outputs t.outputs, seen (~(put in seen) x.u.mb))
 ::
 ::  -- DLEQ Proof --------------------------------------------
 ::
@@ -113,85 +118,62 @@
   (rev 3 32 (shax msg))
 ::  dleq-prove (NUT-12): e = hash-e(R1, R2, A, C_); s = r + a*e (mod n).
 ::
+::    big-a is the mint's public key a*G for this denomination. The caller
+::    already has it, and recomputing it here was a quarter of the work
+::    of signing an output.
+::
 ++  dleq-prove
-  |=  [b-=point c-=point a=@ rng=@]
+  |=  [b-=point c-=point a=@ big-a=point rng=@]
   ^-  [e=@ s=@]
   ::  Bind the nonce to the FULL uncompressed encodings of both B_ and C_
   ::  (not just x.b-). -B_ negates y, and C_=a*B_ negates with it, so the
   ::  nonce differs for B_ vs -B_ even when rng is identical. This closes
-  ::  the DLEQ nonce-reuse key-recovery attack. Still deterministic; still
-  ::  mixes rng. e/s semantics and dleq-verify are unchanged.
+  ::  the DLEQ nonce-reuse key-recovery attack.
   =/  bh=@t  (uncomp-hex b-)
   =/  ch=@t  (uncomp-hex c-)
   =/  r-raw
     %-  shax
     %+  can  3
-    :~  [32 (add (bex 256) a)]
+    :~  [32 a]
         [(met 3 bh) bh]
         [(met 3 ch) ch]
-        [32 (add (bex 256) rng)]
+        [32 rng]
     ==
   =/  r  (mod r-raw secp-n)
   =.  r  ?:(=(0 r) 1 r)
-  =/  big-a   (pt-mul a pt-gen)
-  =/  r1      (pt-mul r pt-gen)
-  =/  r2      (pt-mul r b-)
+  =/  r1  (pt-mul r pt-gen)
+  =/  r2  (pt-mul r b-)
   =/  e  (hash-e ~[r1 r2 big-a c-])
   =/  s  (sadd r (smul a (mod e secp-n)))
   [e s]
 ::
 ::  Verify a DLEQ proof (NUT-12): R1 = s*G - e*A, R2 = s*B_ - e*C_.
+::  Total: out-of-range e or s, or an R at infinity, is %.n, not a crash.
 ++  dleq-verify
   |=  [b-=point c-=point a-pub=point e=@ s=@]
   ^-  ?
   =/  em  (mod e secp-n)
-  =/  r1-p  (pt-add (pt-mul s pt-gen) (pt-neg (pt-mul em a-pub)))
-  =/  r2-p  (pt-add (pt-mul s b-) (pt-neg (pt-mul em c-)))
+  ?:  |(=(0 em) =(0 s) (gte s secp-n))  %.n
+  =/  sg  (pt-mul s pt-gen)
+  =/  ea  (pt-mul em a-pub)
+  =/  sb  (pt-mul s b-)
+  =/  ec  (pt-mul em c-)
+  ?:  |(=(sg ea) =(sb ec))  %.n
+  =/  r1-p  (pt-add sg (pt-neg ea))
+  =/  r2-p  (pt-add sb (pt-neg ec))
   =(e (hash-e ~[r1-p r2-p a-pub c-]))
 ::
 ::  -- BIP-340 Schnorr Signature Verification (NUT-11) ----------
 ::
+::  schnorr-verify: pub is a compressed key (its x is the BIP-340 key),
+::  msg the 32-byte message as shax gives it, sig 128 hex digits. Runs
+::  zuse's verify, which vere jets (%sove); zuse reads all three as
+::  big-endian integers.
 ++  schnorr-verify
   |=  [pub=@t msg=@ sig=@t]
   ^-  ?
-  =/  maybe-p  (hex-to-pt pub)
-  ?~  maybe-p  %.n
-  =/  p=point  u.maybe-p
-  =/  pk-x  x.p
-  ::  BIP-340: lift to even-y point
-  =/  p-even  ?:(=(0 (mod y.p 2)) p (pt-neg p))
-  ::  Parse 64-byte sig (128 hex) into r and s
-  =/  sig-chars  (trip sig)
-  ?.  =(128 (lent sig-chars))  %.n
-  =/  r  (hex-decode (crip (scag 64 sig-chars)))
-  =/  s  (hex-decode (crip (slag 64 sig-chars)))
-  ?.  (lth r secp-p)  %.n
-  ?.  (lth s secp-n)  %.n
-  ?:  =(0 s)  %.n
-  ::  e = tagged_hash("BIP0340/challenge", r || P.x || msg) mod n
-  ::  BIP-340: shax/shay LE bytes = standard SHA256 byte order in can payload
-  ::  hex-decode integers (r, pk-x) need rev to match standard byte order
-  ::  shax outputs (tag-hash, msg) already have correct LE bytes
-  =/  tag-hash  (shax 'BIP0340/challenge')
-  =/  ch-payload
-    %+  can  3
-    :~  [32 (add (bex 256) tag-hash)]
-        [32 (add (bex 256) tag-hash)]
-        [32 (add (bex 256) (rev 3 32 r))]
-        [32 (add (bex 256) (rev 3 32 pk-x))]
-        [32 (add (bex 256) msg)]
-    ==
-  =/  e  (mod (rev 3 32 (shay 160 ch-payload)) secp-n)
-  ?:  =(0 e)  %.n
-  ::  R = s*G - e*P  (s*G uses jetted priv-to-pub)
-  =/  sg  (pt-mul s pt-gen)
-  =/  ep  (pt-mul e p-even)
-  ::  BIP-340: R = s*G - e*P must not be the point at infinity (=> invalid).
-  ::  sg + (-ep) is infinity exactly when sg == ep; affine pt-add would crash on
-  ::  that mutual-inverse case, so reject it here (return %.n) instead.
-  ?:  =(sg ep)  %.n
-  =/  r-pt  (pt-add sg (pt-neg ep))
-  ::  Verify: R.x == r and R.y is even
-  ?.  =(x.r-pt r)  %.n
-  =(0 (mod y.r-pt 2))
+  =/  p  (hex-to-pt pub)
+  ?~  p  %.n
+  ?.  &(=(128 (met 3 sig)) (is-hex sig))  %.n
+  (verify:schnorr:secp256k1:secp:crypto x.u.p (rev 3 32 msg) (hex-decode sig))
 --

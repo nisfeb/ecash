@@ -1,66 +1,17 @@
 ::  /lib/curve/hoon
-::  secp256k1 — hybrid: jetted pubkey gen from zuse + pure Hoon BDHKE ops
+::  secp256k1 point arithmetic in pure Hoon, for BDHKE.
 ::
-::  Key generation uses priv-to-pub:secp256k1:secp:crypto (jetted in vere).
-::  BDHKE scalar mults (blind-sign, hash-to-curve) use pure Hoon double-and-add.
+::    Every scalar multiplication, k*G included, runs the fixed-length
+::    Montgomery ladder in +pt-mul. zuse's priv-to-pub is not jetted and
+::    its double-and-add leaks the scalar's bit length, so nothing here
+::    uses it.
 ::
 |%
-::  -- Constants (computed at runtime) --
-++  secp-p  (sub (bex 256) (add (bex 32) 977))
-++  secp-n
-  =/  n0  (lsh [0 240] 0xffff)
-  =/  n1  (lsh [0 224] 0xffff)
-  =/  n2  (lsh [0 208] 0xffff)
-  =/  n3  (lsh [0 192] 0xffff)
-  =/  n4  (lsh [0 176] 0xffff)
-  =/  n5  (lsh [0 160] 0xffff)
-  =/  n6  (lsh [0 144] 0xffff)
-  =/  n7  (lsh [0 128] 0xfffe)
-  =/  n8  (lsh [0 112] 0xbaae)
-  =/  n9  (lsh [0 96] 0xdce6)
-  =/  n10  (lsh [0 80] 0xaf48)
-  =/  n11  (lsh [0 64] 0xa03b)
-  =/  n12  (lsh [0 48] 0xbfd2)
-  =/  n13  (lsh [0 32] 0x5e8c)
-  =/  n14  (lsh [0 16] 0xd036)
-  =/  n15  0x4141
-  (add n0 (add n1 (add n2 (add n3 (add n4 (add n5 (add n6 (add n7 (add n8 (add n9 (add n10 (add n11 (add n12 (add n13 (add n14 n15)))))))))))))))
-++  secp-gx
-  =/  g0  (lsh [0 240] 0x79be)
-  =/  g1  (lsh [0 224] 0x667e)
-  =/  g2  (lsh [0 208] 0xf9dc)
-  =/  g3  (lsh [0 192] 0xbbac)
-  =/  g4  (lsh [0 176] 0x55a0)
-  =/  g5  (lsh [0 160] 0x6295)
-  =/  g6  (lsh [0 144] 0xce87)
-  =/  g7  (lsh [0 128] 0xb07)
-  =/  g8  (lsh [0 112] 0x29b)
-  =/  g9  (lsh [0 96] 0xfcdb)
-  =/  g10  (lsh [0 80] 0x2dce)
-  =/  g11  (lsh [0 64] 0x28d9)
-  =/  g12  (lsh [0 48] 0x59f2)
-  =/  g13  (lsh [0 32] 0x815b)
-  =/  g14  (lsh [0 16] 0x16f8)
-  =/  g15  0x1798
-  (add g0 (add g1 (add g2 (add g3 (add g4 (add g5 (add g6 (add g7 (add g8 (add g9 (add g10 (add g11 (add g12 (add g13 (add g14 g15)))))))))))))))
-++  secp-gy
-  =/  y0  (lsh [0 240] 0x483a)
-  =/  y1  (lsh [0 224] 0xda77)
-  =/  y2  (lsh [0 208] 0x26a3)
-  =/  y3  (lsh [0 192] 0xc465)
-  =/  y4  (lsh [0 176] 0x5da4)
-  =/  y5  (lsh [0 160] 0xfbfc)
-  =/  y6  (lsh [0 144] 0xe11)
-  =/  y7  (lsh [0 128] 0x8a8)
-  =/  y8  (lsh [0 112] 0xfd17)
-  =/  y9  (lsh [0 96] 0xb448)
-  =/  y10  (lsh [0 80] 0xa685)
-  =/  y11  (lsh [0 64] 0x5419)
-  =/  y12  (lsh [0 48] 0x9c47)
-  =/  y13  (lsh [0 32] 0xd08f)
-  =/  y14  (lsh [0 16] 0xfb10)
-  =/  y15  0xd4b8
-  (add y0 (add y1 (add y2 (add y3 (add y4 (add y5 (add y6 (add y7 (add y8 (add y9 (add y10 (add y11 (add y12 (add y13 (add y14 y15)))))))))))))))
+::  -- Constants --
+++  secp-p  0xffff.ffff.ffff.ffff.ffff.ffff.ffff.ffff.ffff.ffff.ffff.ffff.ffff.fffe.ffff.fc2f
+++  secp-n  0xffff.ffff.ffff.ffff.ffff.ffff.ffff.fffe.baae.dce6.af48.a03b.bfd2.5e8c.d036.4141
+++  secp-gx  0x79be.667e.f9dc.bbac.55a0.6295.ce87.0b07.029b.fcdb.2dce.28d9.59f2.815b.16f8.1798
+++  secp-gy  0x483a.da77.26a3.c465.5da4.fbfc.0e11.08a8.fd17.b448.a685.5419.9c47.d08f.fb10.d4b8
 ::
 ::  -- Types --
 +$  point  [x=@ y=@]
@@ -99,17 +50,11 @@
 ++  sadd
   |=  [a=@ b=@]  ^-  @
   (mod (add a b) secp-n)
-++  ssub
-  |=  [a=@ b=@]  ^-  @
-  (mod (add a (sub secp-n (mod b secp-n))) secp-n)
 ++  smul
   |=  [a=@ b=@]  ^-  @
   (mod (mul a b) secp-n)
-++  sinv
-  |=  a=@  ^-  @
-  (powmod a (sub secp-n 2) secp-n)
 ::
-::  -- Point operations (pure Hoon, for BDHKE) --
+::  -- Point operations (affine) --
 ++  pt-gen  ^-  point  [secp-gx secp-gy]
 ++  pt-neg
   |=  p=point  ^-  point
@@ -118,9 +63,7 @@
   |=  [p=point q=point]  ^-  point
   ?:  =(x.p x.q)
     ?:  =(y.p y.q)  (pt-dbl p)
-    ::  P + (-P) is the point at infinity; secp doesn't model it, so crash
-    ::  loudly — any caller that relies on the old silent pt-gen fallback
-    ::  was masking a bug.
+    ::  P + (-P) is the point at infinity, which point can't hold: crash
     ~|  %pt-add-point-at-infinity
     !!
   =/  lam  (fdiv (fsub y.q y.p) (fsub x.q x.p))
@@ -129,17 +72,15 @@
 ++  pt-dbl
   |=  p=point  ^-  point
   ?:  =(0 y.p)
-    ::  2*P where y=0: the doubled point is the point at infinity. crash
-    ::  rather than silently returning a meaningless generator point.
+    ::  2P with y=0 is the point at infinity: crash
     ~|  %pt-dbl-point-at-infinity
     !!
   =/  lam  (fdiv (fmul 3 (fmul x.p x.p)) (fmul 2 y.p))
   =/  x3   (fsub (fsub (fmul lam lam) x.p) x.p)
   [x3 (fsub (fmul lam (fsub x.p x3)) y.p)]
 ::  -- Jacobian coordinates (defer the per-op modular inverse in scalar mult) --
-::    pt-mul does its double-and-add in Jacobian (no inverses), then converts
-::    back to affine with a single inverse — vs one inverse per affine pt-add/
-::    pt-dbl before. Formulas: dbl-2009-l and add-2007-bl (a=0).
+::    pt-mul works in Jacobian coordinates (no inverses) and converts back
+::    to affine with one inverse. Formulas: dbl-2009-l and add-2007-bl (a=0).
 ++  jac-inf  ^-  jpoint  [1 1 0]
 ++  jac-dbl
   |=  j=jpoint  ^-  jpoint
@@ -186,51 +127,33 @@
   =/  zi2  (fmul zi zi)
   =/  zi3  (fmul zi2 zi)
   [(fmul x.j zi2) (fmul y.j zi3)]
+::  pt-mul: k*P by a left-to-right Montgomery ladder.
+::
+::    The ladder runs over kk = k + n, or k + 2n when k + n is still
+::    below 2^256 (nP is infinity, so kk*P = k*P). kk always has exactly
+::    257 bits with the top one set, so every scalar takes the same 257
+::    steps, and the infinity shortcut in jac-add is taken only on the
+::    first step, whatever k's leading zeros. Each step does one jac-add
+::    and one jac-dbl. Invariant: r1 = r0 + P.
 ++  pt-mul
   |=  [k=@ p=point]  ^-  point
-  ?>  !=(0 k)
-  ::  k * G: jetted priv-to-pub (fast). k * P: constant-time Montgomery ladder
-  ::  in Jacobian coords (one modular inverse total, at the final to-affine).
-  ?:  =(p pt-gen)
-    (priv-to-pub:secp256k1:secp:crypto k)
-  ::  Left-to-right Montgomery ladder: iterate a FIXED 256 bit positions (widened
-  ::  only if k somehow exceeds 256 bits, which never happens for real scalars
-  ::  < secp-n; the widening only preserves identical output for pathological k).
-  ::  Invariant maintained every step: r1 = r0 + base. Each iteration does exactly
-  ::  one jac-add and one jac-dbl regardless of the bit value, so the work and the
-  ::  loop count depend only on the fixed width, not on the secret scalar's bits.
-  ::  Leading zero bits (k < 2^256) keep r0 = infinity, r1 = base, since jac-add
-  ::  treats jac-inf as the identity and jac-dbl leaves infinity unchanged.
-  =/  base=jpoint  [x.p y.p 1]
-  =/  nbits=@      (max 256 (met 0 k))
-  =/  r0=jpoint    jac-inf
-  =/  r1=jpoint    base
-  =/  i=@          nbits
+  =/  k0=@  (mod k secp-n)
+  ?>  !=(0 k0)
+  =/  kk=@  (add k0 secp-n)
+  =?  kk  (lth kk (bex 256))  (add kk secp-n)
+  =/  r0=jpoint  jac-inf
+  =/  r1=jpoint  [x.p y.p 1]
+  =/  i=@  257
   |-  ^-  point
   ?:  =(0 i)  (jac-to-affine r0)
-  =/  bit=@  (cut 0 [(dec i) 1] k)
-  ?:  =(0 bit)
-    %=  $
-      i   (dec i)
-      r1  (jac-add r0 r1)
-      r0  (jac-dbl r0)
-    ==
-  %=  $
-    i   (dec i)
-    r0  (jac-add r0 r1)
-    r1  (jac-dbl r1)
-  ==
+  ?:  =(0 (cut 0 [(dec i) 1] kk))
+    $(i (dec i), r1 (jac-add r0 r1), r0 (jac-dbl r0))
+  $(i (dec i), r0 (jac-add r0 r1), r1 (jac-dbl r1))
 ::
-::  -- Public key (jetted via zuse for k*G, fast) --
+::  pubkey: k*G
 ++  pubkey
   |=  priv=@  ^-  point
-  (priv-to-pub:secp256k1:secp:crypto priv)
-::
-::  -- Point compression (zuse uses atom encoding) --
-++  pt-compress
-  |=  p=point  ^-  @
-  ::  zuse compress-point: [32 x.p] [1 (add 2 parity)] little-endian
-  (compress-point:secp256k1:secp:crypto p)
+  (pt-mul priv pt-gen)
 ::
 ::  -- Hex encoding --
 ++  pad-hex
@@ -265,22 +188,24 @@
   |=  p=point  ^-  @t
   =/  prefix  ?:(=(0 (mod y.p 2)) '02' '03')
   (crip (weld (trip prefix) (trip (pad-hex x.p 64))))
+::  lift-x: the curve point with this x and the y parity asked for, if any
+++  lift-x
+  |=  [x=@ even=?]
+  ^-  mpoint
+  ?.  (lth x secp-p)  ~
+  =/  y2  (fadd (fmul (fmul x x) x) 7)
+  =/  y1  (powmod y2 (div (add secp-p 1) 4) secp-p)
+  ?.  =(y2 (mod (mul y1 y1) secp-p))  ~
+  `[x ?:(=(even =(0 (mod y1 2))) y1 (fsub 0 y1))]
 ++  hex-to-pt
   |=  hex=@t  ^-  mpoint
-  ?.  =(66 (lent (trip hex)))  ~
-  =/  chars    (trip hex)
-  =/  prefix   (crip (scag 2 chars))
+  =/  chars  (trip hex)
+  ?.  =(66 (lent chars))  ~
+  =/  prefix  (crip (scag 2 chars))
   ?.  |(=(prefix '02') =(prefix '03'))  ~
-  =/  x-hex    (crip (slag 2 chars))
+  =/  x-hex  (crip (slag 2 chars))
   ?.  (is-hex x-hex)  ~
-  =/  x        (hex-decode x-hex)
-  ?.  (lth x secp-p)  ~
-  =/  y2   (fadd (fmul (fmul x x) x) 7)
-  =/  y1   (powmod y2 (div (add secp-p 1) 4) secp-p)
-  ?.  =(y2 (mod (mul y1 y1) secp-p))  ~
-  =/  want-even  =(prefix '02')
-  =/  y  ?:(=(want-even =(0 (mod y1 2))) y1 (fsub 0 y1))
-  `[x y]
+  (lift-x (hex-decode x-hex) =(prefix '02'))
 ++  scalar-to-hex
   |=  s=@  ^-  @t
   (pad-hex s 64)

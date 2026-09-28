@@ -14,7 +14,6 @@ vere-*
 
 # node (test dependencies)
 node_modules
-package-lock.json
 
 # config
 .env
@@ -24,3 +23,4 @@ package-lock.json
 # run `make sync-libs` to regenerate). Keeps a single source of truth.
 desk-services/lib/curve.hoon
 desk-services/lib/bdhke.hoon
+desk-services/lib/ecash-http.hoon

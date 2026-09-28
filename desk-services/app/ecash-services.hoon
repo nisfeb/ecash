@@ -1,33 +1,35 @@
 ::  ecash-services: credential + services access-control agent.
 ::  Non-value-bearing; split out of the %ecash mint. Serves /cred/v1 and
 ::  /services/v1, plus an authenticated admin API at /apps/ecash-services/admin.
+::  The decisions live in /lib/ecash-services-rules, which also brings in
+::  bdhke, curve and the shared HTTP plumbing (ecash-http).
 ::
 /-  *ecash-services
-/+  default-agent, dbug, *bdhke
+/+  default-agent, dbug, *ecash-services-rules
 /*  dashboard-lines  %txt  /app/dashboard/txt
 |%
-::  +cred-keyset-old / +state-old: the pre-C4 persisted shape, kept frozen so
-::  on-load can decode and migrate it. cred-keyset-old has no service-scoped
-::  flag; cred-spent-old is a bare (set @t) keyed only on secret.
-+$  cred-keyset-old
+::  +cred-keyset-0 / +state-0: the pre-C4 persisted shape, kept frozen so
+::  on-load can decode and migrate it. cred-keyset-0 has no service-scoped
+::  flag; its cred-spent is a bare (set @t) keyed only on secret.
++$  cred-keyset-0
   $:  ks-id=@t
       active=?
       keys=(map @ud @t)
       privkeys=(map @ud @)
       created=@da
   ==
-+$  state-old
++$  state-0
   $:  %0
-      cred-keysets=(map @t cred-keyset-old)
+      cred-keysets=(map @t cred-keyset-0)
       cred-spent=(set @t)
       cred-counter=@ud
       services=(map @t service)
   ==
-::  +state-0: the live (post-C4) state. cred-keyset now carries service-scoped;
+::  +state-1: the live state. cred-keyset carries service-scoped;
 ::  cred-spent is namespaced per keyset as (set [kid=@t secret=@t]);
 ::  cred-spent-legacy holds pre-migration bare secrets, consulted only as an
 ::  extra spent signal so no already-redeemed token becomes spendable again.
-+$  state-0
++$  state-1
   $:  %1
       cred-keysets=(map @t cred-keyset)
       cred-spent=(set [@t @t])
@@ -35,13 +37,13 @@
       cred-counter=@ud
       services=(map @t service)
   ==
-+$  versioned-state  $%(state-old state-0)
++$  versioned-state  $%(state-0 state-1)
 +$  card  card:agent:gall
 --
 %-  agent:dbug
 ^-  agent:gall
 =<
-=|  state-0
+=|  state-1
 =*  state  -
 |_  =bowl:gall
 +*  this  .
@@ -50,51 +52,13 @@
 ++  on-save   ^-  vase  !>(state)
 ++  on-load
   |=  old=vase
-  |^  ^-  (quip card _this)
-      =/  prev=versioned-state  !<(versioned-state old)
-      =?  prev  ?=(%0 -.prev)  (state-old-to-0 prev)
-      ?>  ?=(%1 -.prev)
-      :_  this(state prev)
-      :~  [%pass /eyre/connect-cred %arvo %e %connect [`/cred dap.bowl]]
-          [%pass /eyre/connect-services %arvo %e %connect [`/services dap.bowl]]
-          [%pass /eyre/connect-apps %arvo %e %connect [`/apps/ecash-services dap.bowl]]
-      ==
-  ::  state-old-to-0: reconstruct service-scoped from the services map (a
-  ::  keyset is service-backing iff some service references its ks-id), and
-  ::  move old bare spent secrets into cred-spent-legacy (kid unrecoverable).
-  ++  state-old-to-0
-    |=  o=state-old
-    ^-  state-0
-    =/  svc-ks=(set @t)
-      %-  ~(gas in *(set @t))
-      %+  turn  ~(val by services.o)
-      |=(s=service ks-id.s)
-    =/  upgraded=(map @t cred-keyset)
-      %-  ~(run by cred-keysets.o)
-      |=  k=cred-keyset-old
-      ^-  cred-keyset
-      :*  ks-id.k
-          active.k
-          keys.k
-          privkeys.k
-          created.k
-          service-scoped=(~(has in svc-ks) ks-id.k)
-      ==
-    :*  %1
-        upgraded
-        cred-spent=*(set [@t @t])
-        cred-spent-legacy=cred-spent.o
-        cred-counter.o
-        services.o
-    ==
-  --
-++  on-init
   ^-  (quip card _this)
-  :_  this
-  :~  [%pass /eyre/connect-cred %arvo %e %connect [`/cred dap.bowl]]
-      [%pass /eyre/connect-services %arvo %e %connect [`/services dap.bowl]]
-      [%pass /eyre/connect-apps %arvo %e %connect [`/apps/ecash-services dap.bowl]]
-  ==
+  =/  prev=versioned-state  !<(versioned-state old)
+  =?  prev  ?=(%0 -.prev)  (state-0-to-1 prev)
+  ?>  ?=(%1 -.prev)
+  =.  cred-keysets.prev  (retire-orphans cred-keysets.prev services.prev)
+  [(binds dap.bowl) this(state prev)]
+++  on-init   [(binds dap.bowl) this]
 ++  on-poke
   |=  [=mark =vase]
   ^-  (quip card _this)
@@ -107,6 +71,7 @@
 ++  on-watch
   |=  =path
   ^-  (quip card _this)
+  ::  no src/sap gate: gall gives a guest request and a remote ship the same provenance
   ?+  path  (on-watch:def path)
       [%http-response *]  `this
   ==
@@ -116,280 +81,45 @@
 ++  on-arvo
   |=  [=wire =sign-arvo]
   ^-  (quip card _this)
-  ?+  wire  (on-arvo:def wire sign-arvo)
-      [%eyre %connect-cred ~]      `this
-      [%eyre %connect-services ~]  `this
-      [%eyre %connect-apps ~]      `this
-  ==
+  ?.  ?=([%eyre %bound *] sign-arvo)  (on-arvo:def wire sign-arvo)
+  ?:  accepted.sign-arvo  `this
+  ~&  >>>  [%ecash-services-bind-failed wire]
+  `this
 ++  on-fail   on-fail:def
 --
 ::  -- Helper core --
 |%
+++  binds
+  |=  dap=term
+  ^-  (list card)
+  :~  [%pass /eyre/connect-cred %arvo %e %connect [`/cred dap]]
+      [%pass /eyre/connect-services %arvo %e %connect [`/services dap]]
+      [%pass /eyre/connect-apps %arvo %e %connect [`/apps/ecash-services dap]]
+  ==
+::
+::  state-0-to-1: reconstruct service-scoped from the services map (a
+::  keyset is service-backing iff some service references its ks-id), and
+::  move old bare spent secrets into cred-spent-legacy (kid unrecoverable).
+++  state-0-to-1
+  |=  o=state-0
+  ^-  state-1
+  =/  svc-ks=(set @t)  (silt (turn ~(val by services.o) |=(s=service ks-id.s)))
+  =/  upgraded=(map @t cred-keyset)
+    %-  ~(run by cred-keysets.o)
+    |=  k=cred-keyset-0
+    ^-  cred-keyset
+    [ks-id.k active.k keys.k privkeys.k created.k (~(has in svc-ks) ks-id.k)]
+  [%1 upgraded ~ cred-spent.o cred-counter.o services.o]
+::
 ++  ec
-  |_  [=bowl:gall st=state-0]
-  ::
-  ::  max outputs accepted per issue request (bounds per-event EC work)
-  ++  max-batch  ^-  @ud  100
-  ::
-  ::  max raw request-body bytes accepted BEFORE the JSON decode (pre-cap DoS:
-  ::  de:json allocates the whole body on one serial event).
-  ++  max-body-bytes  ^-  @ud  1.048.576
-  ::
-  ::  host-of-url: extract host[:port] authority from an Origin/Referer url.
-  ++  host-of-url
-    |=  url=@t
-    ^-  @t
-    =/  txt=tape  (trip url)
-    =/  spos=(unit @ud)  (find "://" txt)
-    =?  txt  ?=(^ spos)  (slag (add 3 u.spos) txt)
-    =/  ppos=(unit @ud)  (find "/" txt)
-    =?  txt  ?=(^ ppos)  (scag u.ppos txt)
-    (crip txt)
-  ::
-  ::  csrf-ok: CSRF guard for state-changing admin requests. Safe methods and
-  ::  requests with no Origin/Referer (non-browser clients) are allowed; a
-  ::  mutating request that carries an Origin/Referer must be same-origin.
-  ++  csrf-ok
-    |=  req=inbound-request:eyre
-    ^-  ?
-    =/  meth  method.request.req
-    ?:  ?|  =(%'GET' meth)  =(%'HEAD' meth)  =(%'OPTIONS' meth)  ==
-      &
-    =/  hdrs  header-list.request.req
-    =/  origin  (get-header:http 'origin' hdrs)
-    =/  src=(unit @t)
-      ?^  origin  origin
-      (get-header:http 'referer' hdrs)
-    ?~  src  &
-    =/  host  (get-header:http 'host' hdrs)
-    ?~  host  |
-    =((host-of-url u.src) u.host)
-  ::  -- JSON number parsing (bare digits, no Hoon dot separators) --
-  ++  parse-ud
-    |=  t=@t  ^-  @ud
-    ?:  (gth (met 3 t) 20)  0
-    =/  res  (rust (trip t) (bass 10 (plus dit)))
-    ?~(res 0 u.res)
-  ::
-  ::  parse-object-body: decode a POST body as a JSON object.
-  ::
-  ::    Returns %& with the whole %o json on success (callers still access
-  ::    `p.jon` to get the map), or %| with an error cord suitable for a
-  ::    400 detail payload.
-  ::
-  ++  parse-object-body
-    |=  body=(unit octs)
-    ^-  (each json @t)
-    ?~  body  [%| 'no-body']
-    ?:  (gth p.u.body max-body-bytes)  [%| 'body-too-large']
-    =/  parsed=(unit json)  (de:json:html (crip (trip q.u.body)))
-    ?~  parsed               [%| 'invalid-json']
-    ?.  ?=([%o *] u.parsed)  [%| 'expected-object']
-    [%& u.parsed]
-  ::
-  ::  JSON field extractors — each returns a default on missing / wrong type.
-  ::
-  ::    Callers that need to distinguish absent-vs-default check `has` first.
-  ::
-  ++  has-key  |=([o=(map @t json) k=@t] ?=(^ (~(get by o) k)))
-  ::
-  ++  get-str
-    |=  [o=(map @t json) k=@t]
-    ^-  @t
-    =/  v  (~(get by o) k)
-    ?~  v  ''
-    ?+(-.u.v '' %s p.u.v)
-  ::
-  ++  get-num
-    |=  [o=(map @t json) k=@t]
-    ^-  @ud
-    =/  v  (~(get by o) k)
-    ?~  v  0
-    ?+(-.u.v 0 %n (parse-ud p.u.v))
-  ::
-  ++  get-bool
-    |=  [o=(map @t json) k=@t]
-    ^-  ?
-    =/  v  (~(get by o) k)
-    ?~  v  %.n
-    ?+(-.u.v %.n %b p.u.v)
-  ::
-  ++  get-array
-    |=  [o=(map @t json) k=@t]
-    ^-  (list json)
-    =/  v  (~(get by o) k)
-    ?~  v  ~
-    ?.  ?=([%a *] u.v)  ~
-    p.u.v
-  ::
-  ++  get-obj
-    |=  [o=(map @t json) k=@t]
-    ^-  (map @t json)
-    =/  v  (~(get by o) k)
-    ?~  v  ~
-    ?.  ?=([%o *] u.v)  ~
-    p.u.v
-  ::
-  ::  -- Service layer helpers ----------------------------------
-  ::
-  ::  resolve-service: look up a service by name, returning the usable svc
-  ::  or an error cord for direct 400 surfacing.
-  ::
-  ++  resolve-service
-    |=  name=@t
-    ^-  (each service @t)
-    =/  maybe-svc  (~(get by services.st) name)
-    ?~  maybe-svc            [%| 'service-not-found']
-    =/  svc=service  u.maybe-svc
-    ?.  active.svc           [%| 'service-inactive']
-    ?:  ?&  ?=(^ expires.svc)
-            (gth now.bowl u.expires.svc)
-        ==
-      [%| 'service-expired']
-    [%& svc]
-  ::
-  ::  service-issue: sign blinded outputs for a service.
-  ::
-  ::    Enforces per-service max-issuance and stamps the output list with the
-  ::    service's backing keyset id before delegating to cred-sign-outputs.
-  ::    Crashing signatures (bad curve point, etc.) still land as per-element
-  ::    error objects; legitimate ones increment service.issued.
-  ::
-  ++  service-issue
-    |=  [svc=service outputs=(list json)]
-    ^-  (each [sigs=(list json) new=service] @t)
-    =/  stamped=(list json)  (stamp-ks-id outputs ks-id.svc)
-    =/  sigs=(list json)     (cred-sign-outputs-as stamped %.y)
-    ::  Count only outputs that received a real signature: per-element error
-    ::  objects carry an 'error' key (no C_). Junk outputs must not consume the
-    ::  issuance cap or inflate `issued`.
-    =/  ok=@ud
-      %-  lent
-      %+  skip  sigs
-      |=(j=json &(?=([%o *] j) (has-key p.j 'error')))
-    ?:  ?&  ?=(^ max-issuance.svc)
-            (gth (add issued.svc ok) u.max-issuance.svc)
-        ==
-      [%| 'service-issuance-cap-reached']
-    =/  new-svc=service      svc(issued (add issued.svc ok))
-    [%& [sigs new-svc]]
-  ::
-  ::  service-check: verify proofs against a specific service's keyset.
-  ::
-  ::    Tokens whose `id` field does not match the service's backing keyset
-  ::    are marked invalid — this is how services stay cross-scoped.
-  ::
-  ++  service-check
-    |=  [svc=service proofs=(list json)]
-    ^-  (list [secret=@t valid=? spent=?])
-    =/  raw  (cred-check-proofs proofs %.y)
-    =/  scoped=(list ?)
-      %+  turn  proofs
-      |=  tok=json
-      ?.  ?=([%o *] tok)  %.n
-      =((get-str p.tok 'id') ks-id.svc)
-    =/  combined=(list [secret=@t valid=? spent=?])
-      |-
-      ?~  raw  ~
-      ?~  scoped  ~
-      :-  [secret.i.raw &(valid.i.raw i.scoped) &(spent.i.raw i.scoped)]
-      $(raw t.raw, scoped t.scoped)
-    combined
-  ::
-  ::  stamp-ks-id: rewrite each output's `id` field to match ks-id.
-  ::
-  ::    Client-submitted blinded outputs may omit or misstate the keyset id;
-  ::    service endpoints always sign with the service's backing keyset so
-  ::    we overwrite to keep the scoping invariant true.
-  ::
-  ++  stamp-ks-id
-    |=  [outputs=(list json) ks-id=@t]
-    ^-  (list json)
-    %+  turn  outputs
-    |=  msg=json
-    ^-  json
-    ?.  ?=([%o *] msg)  msg
-    [%o (~(put by p.msg) 'id' s+ks-id)]
-  ::
-  ::  service-to-json: public-facing serialization (no allowlist plaintext).
-  ::
-  ++  service-to-json
-    |=  svc=service
-    ^-  json
-    %-  pairs:enjs:format
-    :~  ['name' s+name.svc]
-        ['title' s+title.svc]
-        ['description' s+description.svc]
-        ['kind' s+?-(kind.svc %single-use 'single-use')]
-        ['ks_id' s+ks-id.svc]
-        ['active' b+active.svc]
-        ['issued' (numb:enjs:format issued.svc)]
-        ['redeemed' (numb:enjs:format redeemed.svc)]
-        ['allowlist_count' (numb:enjs:format ~(wyt in allowlist.svc))]
-        ['allowlist_required' b+!=(~ allowlist.svc)]
-        :-  'expires'
-        ?~  expires.svc  ~
-        (numb:enjs:format (da-to-unix u.expires.svc))
-        :-  'max_issuance'
-        ?~  max-issuance.svc  ~
-        (numb:enjs:format u.max-issuance.svc)
-        ['created' (numb:enjs:format (da-to-unix created.svc))]
-    ==
-  ::
-  ::  service-to-json-admin: like service-to-json but includes the plaintext
-  ::  allowlist keys. Only call from admin endpoints.
-  ::
-  ++  service-to-json-admin
-    |=  svc=service
-    ^-  json
-    =/  base=json  (service-to-json svc)
-    ?.  ?=([%o *] base)  base
-    =/  keys=(list json)
-      %+  turn  ~(tap in allowlist.svc)
-      |=  k=@t
-      s+k
-    [%o (~(put by p.base) 'allowlist' [%a keys])]
-  ::
-  ::  parse-request-path: url cord -> list of path segments (query stripped)
-  ::
-  ++  parse-request-path
-    |=  url=@t
-    ^-  (list @t)
-    =/  tail=tape  (trip url)
-    =/  qpos=(unit @ud)  (find "?" tail)
-    =?  tail  ?=(^ qpos)  (scag u.qpos tail)
-    =/  tail-len=@ud  (lent tail)
-    =?  tail  &((gth tail-len 0) =('/' (snag (dec tail-len) tail)))
-      (scag (dec tail-len) tail)
-    %+  turn
-      (skip (split-tape tail '/') |=(s=tape =(~ s)))
-    crip
-  ::
-  ::  da-to-unix: @da to unix epoch seconds
-  ++  da-to-unix
-    |=  da=@da
-    ^-  @ud
-    (div (sub da ~1970.1.1) ~s1)
-  ::
-  ::  Split a tape on a character
-  ++  split-tape
-    |=  [t=tape c=@]
-    ^-  (list tape)
-    =|  acc=(list tape)
-    =|  cur=tape
-    |-
-    ?~  t
-      (flop [cur acc])
-    ?:  =(i.t c)
-      $(t t.t, acc [cur acc], cur ~)
-    $(t t.t, cur (snoc cur i.t))
+  |_  [=bowl:gall st=state-1]
   ::
   ::  handle-http: route an inbound HTTP request to its handler.
   ::
   ++  handle-http
     |=  [eyre-id=@ta req=inbound-request:eyre]
-    ^-  (quip card state-0)
-    =/  req-body            body.request.req
+    ^-  (quip card state-1)
+    =/  body                body.request.req
     =/  segs=(list @t)      (parse-request-path url.request.req)
     =/  route=(list @t)     [method.request.req segs]
     ::  Admin surface requires a valid ship session. Eyre sets
@@ -399,427 +129,277 @@
     ?:  ?&  ?=([%apps %ecash-services %admin *] segs)
             !authenticated.req
         ==
-      :_  st  (give-err eyre-id 401 'unauthorized')
+      [(give-err eyre-id 401 'unauthorized') st]
     ::  CSRF: a state-changing admin request must be same-origin.
     ?:  ?&  ?=([%apps %ecash-services %admin *] segs)
             !(csrf-ok req)
         ==
-      :_  st  (give-err eyre-id 403 'forbidden-cross-origin')
-    ?+  route  :_  st  (give-err eyre-id 404 'not-found')
+      [(give-err eyre-id 403 'forbidden-cross-origin') st]
+    ::  CORS preflight, public routes only (admin OPTIONS stays 404)
+    ?:  ?&  ?=(%'OPTIONS' method.request.req)
+            ?=(?([%cred %v1 *] [%services %v1 *]) segs)
+        ==
+      [(give-preflight eyre-id) st]
+    ?+  route  [(give-err eyre-id 404 'not-found') st]
         [%'GET' %apps %ecash-services %admin ~]
-      :_  st
-      (give-http eyre-id 200 [['content-type' 'text/html'] ~] `(as-octs:mimes:html (rap 3 (join `@t`10 `wain`dashboard-lines))))
-        [%'GET' %cred %v1 %keys ~]            :_  st  (cred-get-keys eyre-id)
-        [%'GET' %cred %v1 %keys @ ~]          :_  st  (cred-get-keys-by-id eyre-id i.t.t.t.t.route)
-        [%'GET' %cred %v1 %keysets ~]         :_  st  (cred-get-keysets eyre-id)
-        [%'POST' %cred %v1 %issue ~]          (cred-post-issue eyre-id req-body)
-        [%'POST' %cred %v1 %verify ~]         :_  st  (cred-post-verify eyre-id req-body)
-        [%'POST' %cred %v1 %redeem ~]         (cred-post-redeem eyre-id req-body)
-        [%'GET' %services %v1 %list ~]        :_  st  (svc-get-list eyre-id)
-        [%'GET' %services %v1 @ ~]            :_  st  (svc-get-detail eyre-id i.t.t.t.route)
-        [%'POST' %services %v1 @ %issue ~]    (svc-post-issue eyre-id i.t.t.t.route req-body)
-        [%'POST' %services %v1 @ %verify ~]   :_  st  (svc-post-verify eyre-id i.t.t.t.route req-body)
-        [%'POST' %services %v1 @ %redeem ~]   (svc-post-redeem eyre-id i.t.t.t.route req-body)
+      [(give-dashboard eyre-id dashboard-lines eny.bowl) st]
+        [%'GET' %cred %v1 %keys ~]            [(cred-get-keys eyre-id) st]
+        [%'GET' %cred %v1 %keys @ ~]          [(cred-get-keys-by-id eyre-id i.t.t.t.t.route) st]
+        [%'GET' %cred %v1 %keysets ~]         [(cred-get-keysets eyre-id) st]
+        [%'POST' %cred %v1 %issue ~]          (cred-post-issue eyre-id body)
+        [%'POST' %cred %v1 %verify ~]         [(post-verify eyre-id body ~ 'valid') st]
+        [%'POST' %cred %v1 %redeem ~]         (cred-post-redeem eyre-id body)
+        [%'GET' %services %v1 %list ~]        [(svc-get-list eyre-id) st]
+        [%'GET' %services %v1 @ ~]            [(svc-get-detail eyre-id i.t.t.t.route) st]
+        [%'POST' %services %v1 @ %issue ~]    (svc-post-issue eyre-id i.t.t.t.route body)
+        [%'POST' %services %v1 @ %verify ~]   [(svc-post-verify eyre-id i.t.t.t.route body) st]
+        [%'POST' %services %v1 @ %redeem ~]   (svc-post-redeem eyre-id i.t.t.t.route body)
         [%'GET' %apps %ecash-services %admin %api %cred %overview ~]
-      :_  st  (admin-cred-overview eyre-id)
+      [(admin-cred-overview eyre-id) st]
         [%'POST' %apps %ecash-services %admin %api %cred %keysets %generate ~]
       (admin-cred-keyset-generate eyre-id)
         [%'POST' %apps %ecash-services %admin %api %cred %keysets %activate ~]
-      (admin-cred-keyset-activate eyre-id req-body)
+      (admin-cred-keyset-set eyre-id body &)
         [%'POST' %apps %ecash-services %admin %api %cred %keysets %deactivate ~]
-      (admin-cred-keyset-deactivate eyre-id req-body)
+      (admin-cred-keyset-set eyre-id body |)
         [%'GET' %apps %ecash-services %admin %api %services ~]
-      :_  st  (admin-svc-list eyre-id)
+      [(admin-svc-list eyre-id) st]
         [%'GET' %apps %ecash-services %admin %api %services @ ~]
-      :_  st  (admin-svc-detail eyre-id i.t.t.t.t.t.t.route)
+      [(admin-svc-detail eyre-id i.t.t.t.t.t.t.route) st]
         [%'POST' %apps %ecash-services %admin %api %services %create ~]
-      (admin-svc-create eyre-id req-body)
+      (admin-svc-create eyre-id body)
         [%'POST' %apps %ecash-services %admin %api %services %update ~]
-      (admin-svc-update eyre-id req-body)
+      (admin-svc-update eyre-id body)
         [%'POST' %apps %ecash-services %admin %api %services %activate ~]
-      (admin-svc-activate eyre-id req-body)
+      (admin-svc-set eyre-id body &)
         [%'POST' %apps %ecash-services %admin %api %services %deactivate ~]
-      (admin-svc-deactivate eyre-id req-body)
+      (admin-svc-set eyre-id body |)
         [%'POST' %apps %ecash-services %admin %api %services %delete ~]
-      (admin-svc-delete eyre-id req-body)
+      (admin-svc-delete eyre-id body)
         [%'POST' %apps %ecash-services %admin %api %services %allowlist %add ~]
-      (admin-svc-allowlist-add eyre-id req-body)
+      (admin-svc-allowlist eyre-id body &)
         [%'POST' %apps %ecash-services %admin %api %services %allowlist %remove ~]
-      (admin-svc-allowlist-remove eyre-id req-body)
+      (admin-svc-allowlist eyre-id body |)
     ==
   ::
-  ++  compute-cred-ks-id
-    |=  keys=(map @ud @t)
-    ^-  @t
-    =/  sorted=(list [@ud @t])
-      %+  sort  ~(tap by keys)
-      |=([a=[@ud @t] b=[@ud @t]] (lth -.a -.b))
-    =/  pair-cords=(list @t)
-      %+  turn  sorted
-      |=([amt=@ud pub=@t] (rap 3 ~[(scot %ud amt) ':' pub]))
-    =/  canonical=@t
-      (rap 3 ~[(rap 3 (join ',' pair-cords)) '|unit:cred'])
-    (rap 3 ~['c0' (pad-hex (shax canonical) 64)])
+  ::  -- state readers --
   ::
-  ::  has-dup-x: does the output batch contain two B_ points sharing an
-  ::    x-coordinate?  This is the B_/-B_ DLEQ nonce-reuse attack shape
-  ::    (same x, negated y) that would leak the credential signing key.
-  ::    Malformed / missing B_ are skipped; they fail individually downstream.
-  ::
-  ++  has-dup-x
-    |=  outputs=(list json)
+  ++  is-spent
+    |=  [kid=@t secret=@t]
     ^-  ?
-    =|  seen=(set @)
-    |-  ^-  ?
-    ?~  outputs  %.n
-    =*  msg  i.outputs
-    ?.  ?=([%o *] msg)  $(outputs t.outputs)
-    =/  b-hex=@t  (get-str p.msg 'B_')
-    ?:  =('' b-hex)  $(outputs t.outputs)
-    =/  mb  (hex-to-pt b-hex)
-    ?~  mb  $(outputs t.outputs)
-    =/  xx=@  x.u.mb
-    ?:  (~(has in seen) xx)  %.y
-    $(outputs t.outputs, seen (~(put in seen) xx))
-  ::
-  ::  has-dup-secrets: does this list of [kid secret] keys contain a repeat?
-  ::    The redeem paths' per-element spent check consults only the STORED set,
-  ::    so without this two identical secrets in one batch both read unspent
-  ::    and both get marked + counted (cap/accounting bypass).
-  ::
-  ++  has-dup-secrets
-    |=  keys=(list [@t @t])
-    ^-  ?
-    =|  seen=(set [@t @t])
-    |-  ^-  ?
-    ?~  keys  %.n
-    ?:  (~(has in seen) i.keys)  %.y
-    $(keys t.keys, seen (~(put in seen) i.keys))
-  ::
-  ::  cred-sign-outputs: PUBLIC signer for /cred/v1/issue. Refuses any
-  ::  service-scoped keyset id (treats it as unknown), so service-backing
-  ::  keysets can only be signed via the gated /services path.
-  ::
-  ++  cred-sign-outputs
-    |=  outputs=(list json)
-    ^-  (list json)
-    (cred-sign-outputs-as outputs %.n)
-  ::  cred-sign-outputs-as: shared signer. When allow-scoped is %.n, any
-  ::  keyset whose .service-scoped is %.y is rejected as unknown. The gated
-  ::  service path passes %.y to reach its own keyset.
-  ::
-  ++  cred-sign-outputs-as
-    |=  [outputs=(list json) allow-scoped=?]
-    ^-  (list json)
-    %+  turn  outputs
-    |=  msg=json
-    ^-  json
-    ?.  ?=([%o *] msg)
-      (pairs:enjs:format ['error' s+'invalid-msg']~)
-    =/  amt=@ud  (get-num p.msg 'amount')
-    ?.  =(0 amt)
-      (pairs:enjs:format ['error' s+'credential-amount-must-be-zero']~)
-    =/  b-hex=@t  (get-str p.msg 'B_')
-    ?:  =('' b-hex)
-      (pairs:enjs:format ['error' s+'missing-B_']~)
-    =/  maybe-b-pt  (hex-to-pt b-hex)
-    ?~  maybe-b-pt
-      (pairs:enjs:format ['error' s+'invalid-B_-point']~)
-    =/  b-=point  u.maybe-b-pt
-    =/  kid=@t  (get-str p.msg 'id')
-    ?:  =('' kid)
-      (pairs:enjs:format ['error' s+'missing-keyset-id']~)
-    =/  maybe-ks  (~(get by cred-keysets.st) kid)
-    ?~  maybe-ks
-      (pairs:enjs:format ['error' s+'unknown-credential-keyset']~)
-    =/  ks  u.maybe-ks
-    ?:  &(service-scoped.ks !allow-scoped)
-      (pairs:enjs:format ['error' s+'unknown-credential-keyset']~)
-    ?.  active.ks
-      (pairs:enjs:format ['error' s+'credential-keyset-inactive']~)
-    =/  maybe-priv  (~(get by privkeys.ks) 0)
-    ?~  maybe-priv
-      (pairs:enjs:format ['error' s+'no-credential-key']~)
-    =/  priv=@  u.maybe-priv
-    =/  c-=point  (blind-sign b- priv)
-    =/  c-hex=@t  (pt-to-hex c-)
-    ::  Mix the full B_ hex (02/03 prefix differs for B_ vs -B_) into rng so
-    ::  every credential output gets distinct entropy within one event.
-    =/  rng=@  (shax (cat 3 b-hex (add eny.bowl now.bowl)))
-    =/  dleq-es  (dleq-prove b- c- priv rng)
-    =/  dleq-map=(map @t json)
-      %-  my
-      :~  ['e' s+(scalar-to-hex e.dleq-es)]
-          ['s' s+(scalar-to-hex s.dleq-es)]
-      ==
-    %-  pairs:enjs:format
-    :~  ['C_' s+c-hex]
-        ['amount' (numb:enjs:format 0)]
-        ['id' s+kid]
-        ['dleq' [%o dleq-map]]
+    ?|  (~(has in cred-spent.st) [kid secret])
+        (~(has in cred-spent-legacy.st) secret)
     ==
   ::
-  ::  cred-check-proofs: check credential proof sig + spent status (no spending)
+  ++  proofs-pre
+    |=  [proofs=(list json) scope=(unit @t)]
+    ^-  (list checked-proof)
+    (turn proofs |=(t=json (proof-pre t cred-keysets.st scope)))
   ::
-  ++  cred-check-proofs
-    |=  [proofs=(list json) allow-scoped=?]
-    ^-  (list [kid=@t secret=@t valid=? spent=?])
-    %+  turn  proofs
-    |=  tok=json
-    ?.  ?=([%o *] tok)  ['' '' %.n %.n]
-    =/  c-hex=@t   (get-str p.tok 'C')
-    =/  secret=@t  (get-str p.tok 'secret')
-    =/  kid=@t     (get-str p.tok 'id')
-    ?:  |(=('' c-hex) =('' secret) =('' kid))
-      [kid secret %.n %.n]
-    =/  maybe-ks  (~(get by cred-keysets.st) kid)
-    ?~  maybe-ks
-      [kid secret %.n %.n]
-    =/  ks  u.maybe-ks
-    ::  Public /cred (allow-scoped=%.n) must treat a service-scoped keyset as
-    ::  unknown, so it can neither probe nor burn a service token. The gated
-    ::  /services path passes %.y to reach its own keyset.
-    ?:  &(service-scoped.ks !allow-scoped)
-      [kid secret %.n %.n]
-    =/  maybe-priv  (~(get by privkeys.ks) 0)
-    ?~  maybe-priv
-      [kid secret %.n %.n]
-    =/  priv=@  u.maybe-priv
-    =/  maybe-c-pt  (hex-to-pt c-hex)
-    ?~  maybe-c-pt
-      [kid secret %.n %.n]
-    =/  c-pt=point  u.maybe-c-pt
-    =/  h-pt=point  (hash-to-curve (crip (trip secret)))
-    =/  expected=point  (pt-mul priv h-pt)
-    ?.  =(c-pt expected)
-      [kid secret %.n %.n]
-    =/  is-spent
-      ?|  (~(has in cred-spent.st) [kid secret])
-          (~(has in cred-spent-legacy.st) secret)
-      ==
-    [kid secret %.y is-spent]
+  ::  redeem-refusal: why a redeem batch must be refused, if it must.
+  ::  The cheap checks cover the whole batch before any EC work.
+  ++  redeem-refusal
+    |=  [pres=(list checked-proof) bad=@t dup=@t]
+    ^-  (unit @t)
+    ?.  (levy pres |=(p=checked-proof ?=(^ ok.p)))  `bad
+    ?:  (has-dup-secrets (turn pres |=(p=checked-proof [kid.p secret.p])))  `dup
+    ?.  (levy pres proof-sig-ok)  `bad
+    ~
   ::
-  ::  GET /cred/v1/keys — list active credential keysets with keys
+  ::  read-svc: an admin request naming an existing service
+  ++  read-svc
+    |=  body=(unit octs)
+    ^-  (each [o=(map @t json) svc=service] [@ud @t])
+    =/  o  (read-obj body)
+    ?:  ?=(%| -.o)  |+[400 p.o]
+    =/  name  (get-str p.o 'name')
+    ?:  =('' name)  |+[400 'missing-name']
+    =/  svc  (~(get by services.st) name)
+    ?~  svc  |+[404 'service-not-found']
+    &+[p.o u.svc]
+  ::
+  ::  -- /cred/v1 --
+  ::
+  ::  GET /cred/v1/keys: active, non-service keysets with their keys.
+  ::  Service keysets are issued only through the gated /services path.
   ++  cred-get-keys
     |=  eyre-id=@ta
     ^-  (list card)
-    =/  ks-list=(list json)
-      %+  murn  ~(tap by cred-keysets.st)
-      |=  [id=@t ks=cred-keyset]
-      ?.  active.ks  ~
-      ::  service-scoped keysets are issued only via the gated /services path;
-      ::  do not advertise them as publicly issuable on /cred/v1/keys.
-      ?:  service-scoped.ks  ~
-      %-  some
-      %-  pairs:enjs:format
-      :~  ['id' s+ks-id.ks]
-          ['active' b+active.ks]
-          :-  'keys'
-          %-  pairs:enjs:format
-          %+  turn  ~(tap by keys.ks)
-          |=  [amt=@ud pub=@t]
-          [(scot %ud amt) s+pub]
-      ==
-    (give-json (pairs:enjs:format ['keysets' [%a ks-list]]~) eyre-id)
+    =/  kss=(list json)
+      %+  murn  ~(val by cred-keysets.st)
+      |=  ks=cred-keyset
+      ?.  &(active.ks !service-scoped.ks)  ~
+      `(keyset-json ks)
+    (give-json (pairs:enjs:format ['keysets' a+kss]~) eyre-id)
   ::
   ::  GET /cred/v1/keys/{keyset_id}
+  ::
+  ::    A service keyset's PUBLIC key is intentionally fetchable by id:
+  ::    clients need it to unblind tokens they legitimately obtained, and a
+  ::    pubkey cannot forge a signature. Only signing/verify/redeem are gated.
   ++  cred-get-keys-by-id
     |=  [eyre-id=@ta kid=@t]
     ^-  (list card)
-    =/  maybe-ks  (~(get by cred-keysets.st) kid)
-    ?~  maybe-ks
-      (give-err eyre-id 404 'credential-keyset-not-found')
-    =/  ks  u.maybe-ks
-    ::  NB: a service keyset's PUBLIC key is intentionally fetchable by id —
-    ::  clients need it to unblind tokens they legitimately obtained, and a
-    ::  pubkey cannot forge a signature (the audit rated this disclosure
-    ::  harmless). Only signing/verify/redeem are gated (service-scoped).
-    =/  resp
-      %-  pairs:enjs:format
-      :~  :-  'keysets'
-          :-  %a
-          :~  %-  pairs:enjs:format
-              :~  ['id' s+ks-id.ks]
-                  ['active' b+active.ks]
-                  :-  'keys'
-                  %-  pairs:enjs:format
-                  %+  turn  ~(tap by keys.ks)
-                  |=  [amt=@ud pub=@t]
-                  [(scot %ud amt) s+pub]
-              ==
-          ==
-      ==
-    (give-json resp eyre-id)
+    =/  ks  (~(get by cred-keysets.st) kid)
+    ?~  ks  (give-err eyre-id 404 'credential-keyset-not-found')
+    (give-json (pairs:enjs:format ['keysets' a+~[(keyset-json u.ks)]]~) eyre-id)
   ::
-  ::  GET /cred/v1/keysets — metadata only
+  ::  GET /cred/v1/keysets: metadata of the non-service keysets
   ++  cred-get-keysets
     |=  eyre-id=@ta
     ^-  (list card)
-    =/  ks-list=(list json)
-      %+  turn  ~(tap by cred-keysets.st)
-      |=  [id=@t ks=cred-keyset]
-      %-  pairs:enjs:format
-      :~  ['id' s+ks-id.ks]
-          ['active' b+active.ks]
-      ==
-    (give-json (pairs:enjs:format ['keysets' [%a ks-list]]~) eyre-id)
+    =/  kss=(list json)
+      %+  murn  ~(val by cred-keysets.st)
+      |=  ks=cred-keyset
+      ?:  service-scoped.ks  ~
+      `(pairs:enjs:format ~[['id' s+ks-id.ks] ['active' b+active.ks]])
+    (give-json (pairs:enjs:format ['keysets' a+kss]~) eyre-id)
   ::
-  ::  POST /cred/v1/issue — issue credential tokens
+  ::  POST /cred/v1/issue
   ++  cred-post-issue
-    |=  [eyre-id=@ta req-body=(unit octs)]
-    ^-  (quip card state-0)
-    =/  parsed  (parse-object-body req-body)
-    ?:  ?=(%| -.parsed)  :_(st (give-err eyre-id 400 p.parsed))
-    =/  jon  p.parsed
-    ?>  ?=([%o *] jon)
-    ?.  (has-key p.jon 'outputs')
-      :_(st (give-err eyre-id 400 'missing-outputs'))
-    =/  outputs  (get-array p.jon 'outputs')
-    ?:  =(~ outputs)  :_(st (give-err eyre-id 400 'empty-outputs'))
-    ?:  (gth (lent outputs) max-batch)  :_(st (give-err eyre-id 400 'batch-too-large'))
-    ?:  (has-dup-x outputs)  :_(st (give-err eyre-id 400 'duplicate-output'))
-    =/  sigs=(list json)  (cred-sign-outputs outputs)
-    =.  cred-counter.st
-      %+  add  cred-counter.st
-      (lent (skip sigs |=(j=json &(?=([%o *] j) (has-key p.j 'error')))))
+    |=  [eyre-id=@ta body=(unit octs)]
+    ^-  (quip card state-1)
+    =/  outs  (read-batch body 'outputs')
+    ?:  ?=(%| -.outs)  [(give-err eyre-id 400 p.outs) st]
+    ?:  (has-dup-x a.p.outs)  [(give-err eyre-id 400 'duplicate-output') st]
+    =/  pres  (turn a.p.outs |=(m=json (output-pre m cred-keysets.st ~)))
+    =.  cred-counter.st  (add cred-counter.st (n-ready pres))
     :_  st
-    %-  give-json  :_  eyre-id
-    (pairs:enjs:format ['signatures' [%a sigs]]~)
+    (give-json (pairs:enjs:format ['signatures' a+(sign-batch pres eny.bowl)]~) eyre-id)
   ::
-  ::  POST /cred/v1/verify — check proofs without spending
-  ++  cred-post-verify
-    |=  [eyre-id=@ta req-body=(unit octs)]
+  ::  POST /cred/v1/verify and /services/v1/{name}/verify: check proofs
+  ::  without spending; the answer's list goes under key
+  ++  post-verify
+    |=  [eyre-id=@ta body=(unit octs) scope=(unit @t) key=@t]
     ^-  (list card)
-    =/  parsed  (parse-object-body req-body)
-    ?:  ?=(%| -.parsed)  (give-err eyre-id 400 p.parsed)
-    =/  jon  p.parsed
-    ?>  ?=([%o *] jon)
-    ?.  (has-key p.jon 'proofs')  (give-err eyre-id 400 'missing-proofs')
-    =/  proofs  (get-array p.jon 'proofs')
-    ?:  (gth (lent proofs) max-batch)  (give-err eyre-id 400 'batch-too-large')
-    =/  results  (cred-check-proofs proofs %.n)
-    =/  result-json=(list json)
-      %+  turn  results
-      |=  [kid=@t secret=@t valid=? spent=?]
-      %-  pairs:enjs:format
-      :~  ['secret' s+secret]
-          ['valid' b+valid]
-          ['spent' b+spent]
-      ==
+    =/  proofs  (read-batch body 'proofs')
+    ?:  ?=(%| -.proofs)  (give-err eyre-id 400 p.proofs)
     %-  give-json  :_  eyre-id
-    (pairs:enjs:format ['valid' [%a result-json]]~)
-  ::
-  ::  POST /cred/v1/redeem — verify and spend credential proofs
-  ++  cred-post-redeem
-    |=  [eyre-id=@ta req-body=(unit octs)]
-    ^-  (quip card state-0)
-    =/  parsed  (parse-object-body req-body)
-    ?:  ?=(%| -.parsed)  :_(st (give-err eyre-id 400 p.parsed))
-    =/  jon  p.parsed
-    ?>  ?=([%o *] jon)
-    ?.  (has-key p.jon 'proofs')  :_(st (give-err eyre-id 400 'missing-proofs'))
-    =/  proofs  (get-array p.jon 'proofs')
-    ?:  (gth (lent proofs) max-batch)  :_(st (give-err eyre-id 400 'batch-too-large'))
-    =/  results  (cred-check-proofs proofs %.n)
-    =/  all-valid  (levy results |=([k=@t s=@t v=? sp=?] &(v !sp)))
-    ?.  all-valid
-      =/  first-bad
-        %-  head
-        %+  skim  results
-        |=  [k=@t s=@t v=? sp=?]
-        |(!v sp)
-      =/  err=@t
-        ?:  spent.first-bad  'credential-already-spent'
-        'invalid-credential'
-      :_(st (give-err eyre-id 400 err))
-    ::  Reject a batch that names the same [kid secret] twice: per-element
-    ::  checks each read only the STORED spent set, so duplicates would all
-    ::  pass and be marked/counted as if distinct.
-    ?:  (has-dup-secrets (turn results |=([k=@t s=@t v=? sp=?] [k s])))
-      :_(st (give-err eyre-id 400 'duplicate-credential'))
-    ::  Mark all as spent, namespaced by keyset id
-    =.  cred-spent.st
-      %-  ~(gas in cred-spent.st)
-      (turn results |=([k=@t s=@t v=? sp=?] [k s]))
-    =/  result-json=(list json)
-      %+  turn  results
-      |=  [kid=@t secret=@t valid=? spent=?]
-      %-  pairs:enjs:format
-      :~  ['secret' s+secret]
-          ['redeemed' b+%.y]
-      ==
-    :_  st
-    %-  give-json  :_  eyre-id
-    (pairs:enjs:format ['redeemed' [%a result-json]]~)
-  ::
-  ::  -- Admin credential endpoints --
-  ::
-  ++  admin-cred-keyset-generate
-    |=  eyre-id=@ta
-    ^-  (quip card state-0)
-    =/  ent  (shax eny.bowl)
-    ::  Single key at denomination 0
-    =/  k  (mod (shax (add (mul ent (bex 64)) 7)) secp-n)
-    =/  k2  ?:(=(0 k) 1 k)
-    =/  privkeys=(map @ud @)  (my [0 k2]~)
-    =/  pubkeys=(map @ud @t)  (my [0 (pt-to-hex (pubkey k2))]~)
-    =/  ks-id=@t  (compute-cred-ks-id pubkeys)
-    =/  ks=cred-keyset
-      :*  ks-id=ks-id
-          active=%.y
-          keys=pubkeys
-          privkeys=privkeys
-          created=now.bowl
-          service-scoped=%.n
-      ==
-    =.  cred-keysets.st  (~(put by cred-keysets.st) ks-id ks)
-    :_  st
-    %-  give-json  :_  eyre-id
+    %-  pairs:enjs:format  :_  ~
+    :-  key
+    :-  %a
+    %+  turn  (proofs-pre a.p.proofs scope)
+    |=  p=checked-proof
+    =/  valid  (proof-sig-ok p)
     %-  pairs:enjs:format
-    :~  ['id' s+ks-id]
-        ['active' b+%.y]
-        :-  'keys'
-        %-  pairs:enjs:format
-        %+  turn  ~(tap by pubkeys)
-        |=  [amt=@ud pub=@t]
-        [(scot %ud amt) s+pub]
+    :~  ['secret' s+secret.p]
+        ['valid' b+valid]
+        ['spent' b+&(valid (is-spent kid.p secret.p))]
     ==
   ::
-  ++  admin-cred-keyset-activate
-    |=  [eyre-id=@ta req-body=(unit octs)]
-    ^-  (quip card state-0)
-    =/  parsed  (parse-object-body req-body)
-    ?:  ?=(%| -.parsed)  :_(st (give-err eyre-id 400 p.parsed))
-    =/  jon  p.parsed
-    ?>  ?=([%o *] jon)
-    =/  target-id=@t  (get-str p.jon 'id')
-    ?:  =('' target-id)  :_(st (give-err eyre-id 400 'missing-id'))
-    =/  maybe-ks  (~(get by cred-keysets.st) target-id)
-    ?~  maybe-ks  :_(st (give-err eyre-id 404 'credential-keyset-not-found'))
-    =.  cred-keysets.st  (~(put by cred-keysets.st) target-id u.maybe-ks(active %.y))
+  ::  POST /cred/v1/redeem: verify and spend every proof, or none
+  ++  cred-post-redeem
+    |=  [eyre-id=@ta body=(unit octs)]
+    ^-  (quip card state-1)
+    =/  proofs  (read-batch body 'proofs')
+    ?:  ?=(%| -.proofs)  [(give-err eyre-id 400 p.proofs) st]
+    =/  pres  (proofs-pre a.p.proofs ~)
+    =/  keys  (turn pres |=(p=checked-proof [kid.p secret.p]))
+    =/  no  (redeem-refusal pres 'invalid-credential' 'duplicate-credential')
+    ?^  no  [(give-err eyre-id 400 u.no) st]
+    ?:  (lien keys is-spent)  [(give-err eyre-id 400 'credential-already-spent') st]
+    =.  cred-spent.st  (~(gas in cred-spent.st) keys)
     :_  st
     %-  give-json  :_  eyre-id
-    (pairs:enjs:format ['id' s+target-id] ['active' b+%.y] ~)
+    %-  pairs:enjs:format  :_  ~
+    :-  'redeemed'
+    :-  %a
+    %+  turn  keys
+    |=([k=@t s=@t] (pairs:enjs:format ~[['secret' s+s] ['redeemed' b+&]]))
   ::
-  ++  admin-cred-keyset-deactivate
-    |=  [eyre-id=@ta req-body=(unit octs)]
-    ^-  (quip card state-0)
-    =/  parsed  (parse-object-body req-body)
-    ?:  ?=(%| -.parsed)  :_(st (give-err eyre-id 400 p.parsed))
-    =/  jon  p.parsed
-    ?>  ?=([%o *] jon)
-    =/  target-id=@t  (get-str p.jon 'id')
-    ?:  =('' target-id)  :_(st (give-err eyre-id 400 'missing-id'))
-    =/  maybe-ks  (~(get by cred-keysets.st) target-id)
-    ?~  maybe-ks  :_(st (give-err eyre-id 404 'credential-keyset-not-found'))
-    =.  cred-keysets.st  (~(put by cred-keysets.st) target-id u.maybe-ks(active %.n))
+  ::  -- /services/v1 --
+  ::
+  ::  GET /services/v1/list: active services only
+  ++  svc-get-list
+    |=  eyre-id=@ta
+    ^-  (list card)
+    =/  svcs=(list json)
+      %+  murn  ~(val by services.st)
+      |=  svc=service
+      ?.  active.svc  ~
+      `(service-to-json svc)
+    (give-json (pairs:enjs:format ['services' a+svcs]~) eyre-id)
+  ::
+  ::  GET /services/v1/{name}: a usable service's detail, else 404
+  ++  svc-get-detail
+    |=  [eyre-id=@ta name=@t]
+    ^-  (list card)
+    =/  svc  (resolve-service (~(get by services.st) name) now.bowl)
+    ?:  ?=(%| -.svc)  (give-err eyre-id 404 +.p.svc)
+    (give-json (service-to-json p.svc) eyre-id)
+  ::
+  ::  POST /services/v1/{name}/issue: sign blinded outputs for a service.
+  ::
+  ::    A non-empty allowlist requires an `access_key` in the body that is
+  ::    a member. The cap is checked before any signing, counting only the
+  ::    outputs that will get a real signature.
+  ++  svc-post-issue
+    |=  [eyre-id=@ta name=@t body=(unit octs)]
+    ^-  (quip card state-1)
+    =/  svc  (resolve-service (~(get by services.st) name) now.bowl)
+    ?:  ?=(%| -.svc)  [(give-err eyre-id p.svc) st]
+    =/  outs  (read-batch body 'outputs')
+    ?:  ?=(%| -.outs)  [(give-err eyre-id 400 p.outs) st]
+    ?:  ?&  !=(~ allowlist.p.svc)
+            !(~(has in allowlist.p.svc) (get-str o.p.outs 'access_key'))
+        ==
+      [(give-err eyre-id 403 'service-access-denied') st]
+    ?:  (has-dup-x a.p.outs)  [(give-err eyre-id 400 'duplicate-output') st]
+    =/  pres  (turn a.p.outs |=(m=json (output-pre m cred-keysets.st `ks-id.p.svc)))
+    =/  n  (n-ready pres)
+    ?.  (cap-ok p.svc n)  [(give-err eyre-id 400 'service-issuance-cap-reached') st]
+    =.  services.st  (~(put by services.st) name p.svc(issued (add issued.p.svc n)))
+    =.  cred-counter.st  (add cred-counter.st n)
+    :_  st
+    (give-json (pairs:enjs:format ['signatures' a+(sign-batch pres eny.bowl)]~) eyre-id)
+  ::
+  ::  POST /services/v1/{name}/verify
+  ++  svc-post-verify
+    |=  [eyre-id=@ta name=@t body=(unit octs)]
+    ^-  (list card)
+    =/  svc  (resolve-service (~(get by services.st) name) now.bowl)
+    ?:  ?=(%| -.svc)  (give-err eyre-id p.svc)
+    (post-verify eyre-id body `ks-id.p.svc 'results')
+  ::
+  ::  POST /services/v1/{name}/redeem: verify and mark spent (idempotent).
+  ::
+  ::    Any invalid proof (bad signature or another keyset) refuses the whole
+  ::    batch with 400. Otherwise each token's `status` is `fresh` (first
+  ::    use: spent now) or `replay` (already spent: state untouched, still
+  ::    200), so a retry after a network drop is safe.
+  ++  svc-post-redeem
+    |=  [eyre-id=@ta name=@t body=(unit octs)]
+    ^-  (quip card state-1)
+    =/  svc  (resolve-service (~(get by services.st) name) now.bowl)
+    ?:  ?=(%| -.svc)  [(give-err eyre-id p.svc) st]
+    =/  proofs  (read-batch body 'proofs')
+    ?:  ?=(%| -.proofs)  [(give-err eyre-id 400 p.proofs) st]
+    =/  pres  (proofs-pre a.p.proofs `ks-id.p.svc)
+    =/  no  (redeem-refusal pres 'invalid-service-token' 'duplicate-service-token')
+    ?^  no  [(give-err eyre-id 400 u.no) st]
+    =/  was=(list [key=[@t @t] spent=?])
+      (turn pres |=(p=checked-proof [[kid.p secret.p] (is-spent kid.p secret.p)]))
+    =/  fresh=(list [@t @t])
+      (murn was |=([k=[@t @t] s=?] ?:(s ~ `k)))
+    =.  cred-spent.st  (~(gas in cred-spent.st) fresh)
+    =.  services.st
+      (~(put by services.st) name p.svc(redeemed (add redeemed.p.svc (lent fresh))))
     :_  st
     %-  give-json  :_  eyre-id
-    (pairs:enjs:format ['id' s+target-id] ['active' b+%.n] ~)
+    %-  pairs:enjs:format  :_  ~
+    :-  'redeemed'
+    :-  %a
+    %+  turn  was
+    |=  [k=[@t s=@t] spent=?]
+    (pairs:enjs:format ~[['secret' s+s.k] ['status' s+?:(spent 'replay' 'fresh')]])
+  ::
+  ::  -- admin: credential keysets --
   ::
   ++  admin-cred-overview
     |=  eyre-id=@ta
     ^-  (list card)
+    =/  owner=(map @t @t)
+      (malt (turn ~(val by services.st) |=(s=service [ks-id.s name.s])))
     %-  give-json  :_  eyre-id
     %-  pairs:enjs:format
     :~  ['cred_keysets' (numb:enjs:format ~(wyt by cred-keysets.st))]
@@ -827,382 +407,150 @@
         ['cred_spent' (numb:enjs:format (add ~(wyt in cred-spent.st) ~(wyt in cred-spent-legacy.st)))]
         :-  'keysets'
         :-  %a
-        %+  turn  ~(tap by cred-keysets.st)
-        |=  [id=@t ks=cred-keyset]
+        %+  turn  ~(val by cred-keysets.st)
+        |=  ks=cred-keyset
         %-  pairs:enjs:format
         :~  ['id' s+ks-id.ks]
             ['active' b+active.ks]
+            ['service_scoped' b+service-scoped.ks]
+            ::  the owning service's name; null for a plain keyset, or for a
+            ::  service keyset whose service was deleted
+            ['service' (fall (bind (~(get by owner) ks-id.ks) |=(n=@t `json`s+n)) ~)]
         ==
     ==
   ::
-  ::  ============================================================
-  ::  Services (non-value-bearing access tokens) — public endpoints
-  ::  ============================================================
-  ::
-  ::  GET /services/v1/list — active services only
-  ::
-  ++  svc-get-list
+  ++  admin-cred-keyset-generate
     |=  eyre-id=@ta
-    ^-  (list card)
-    =/  list=(list json)
-      %+  murn  ~(tap by services.st)
-      |=  [name=@t svc=service]
-      ^-  (unit json)
-      ?.  active.svc  ~
-      `(service-to-json svc)
-    (give-json (pairs:enjs:format ['services' [%a list]]~) eyre-id)
+    ^-  (quip card state-1)
+    =/  ks  (gen-cred-keyset eny.bowl now.bowl |)
+    =.  cred-keysets.st  (~(put by cred-keysets.st) ks-id.ks ks)
+    [(give-json (keyset-json ks) eyre-id) st]
   ::
-  ::  GET /services/v1/{name} — service detail (public, active-only)
+  ::  activate (on) or deactivate a plain keyset. A service's keyset lives
+  ::  and dies with its service.
+  ++  admin-cred-keyset-set
+    |=  [eyre-id=@ta body=(unit octs) on=?]
+    ^-  (quip card state-1)
+    =/  o  (read-obj body)
+    ?:  ?=(%| -.o)  [(give-err eyre-id 400 p.o) st]
+    =/  id  (get-str p.o 'id')
+    ?:  =('' id)  [(give-err eyre-id 400 'missing-id') st]
+    =/  ks  (~(get by cred-keysets.st) id)
+    ?~  ks  [(give-err eyre-id 404 'credential-keyset-not-found') st]
+    ?:  service-scoped.u.ks  [(give-err eyre-id 400 'keyset-is-service-scoped') st]
+    =.  cred-keysets.st  (~(put by cred-keysets.st) id u.ks(active on))
+    [(give-json (pairs:enjs:format ~[['id' s+id] ['active' b+on]]) eyre-id) st]
   ::
-  ++  svc-get-detail
-    |=  [eyre-id=@ta name=@t]
-    ^-  (list card)
-    =/  resolved  (resolve-service name)
-    ?:  ?=(%| -.resolved)
-      (give-err eyre-id 404 p.resolved)
-    (give-json (service-to-json p.resolved) eyre-id)
-  ::
-  ::  POST /services/v1/{name}/issue — sign blinded outputs for a service.
-  ::
-  ::    If the service has a non-empty allowlist, the caller must supply
-  ::    `access_key` in the request body whose value is a member of that
-  ::    set. Empty allowlist is treated as public.
-  ::
-  ++  svc-post-issue
-    |=  [eyre-id=@ta name=@t req-body=(unit octs)]
-    ^-  (quip card state-0)
-    =/  resolved  (resolve-service name)
-    ?:  ?=(%| -.resolved)  :_  st  (give-err eyre-id 400 p.resolved)
-    =/  svc=service  p.resolved
-    =/  parsed  (parse-object-body req-body)
-    ?:  ?=(%| -.parsed)  :_  st  (give-err eyre-id 400 p.parsed)
-    =/  jon  p.parsed
-    ?>  ?=([%o *] jon)
-    ::  allowlist gate: if non-empty, require matching access_key
-    ?:  ?&  !=(~ allowlist.svc)
-            !(~(has in allowlist.svc) (get-str p.jon 'access_key'))
-        ==
-      :_  st  (give-err eyre-id 403 'service-access-denied')
-    ?.  (has-key p.jon 'outputs')
-      :_  st  (give-err eyre-id 400 'missing-outputs')
-    =/  outputs  (get-array p.jon 'outputs')
-    ?:  =(~ outputs)  :_  st  (give-err eyre-id 400 'empty-outputs')
-    ?:  (gth (lent outputs) max-batch)  :_  st  (give-err eyre-id 400 'batch-too-large')
-    ?:  (has-dup-x outputs)  :_  st  (give-err eyre-id 400 'duplicate-output')
-    =/  res  (service-issue svc outputs)
-    ?:  ?=(%| -.res)  :_  st  (give-err eyre-id 400 p.res)
-    =.  services.st     (~(put by services.st) name new.p.res)
-    =.  cred-counter.st
-      %+  add  cred-counter.st
-      (lent (skip sigs.p.res |=(j=json &(?=([%o *] j) (has-key p.j 'error')))))
-    :_  st
-    %-  give-json  :_  eyre-id
-    (pairs:enjs:format ['signatures' [%a sigs.p.res]]~)
-  ::
-  ::  POST /services/v1/{name}/verify — check proofs, no spend
-  ::
-  ++  svc-post-verify
-    |=  [eyre-id=@ta name=@t req-body=(unit octs)]
-    ^-  (list card)
-    =/  resolved  (resolve-service name)
-    ?:  ?=(%| -.resolved)  (give-err eyre-id 400 p.resolved)
-    =/  svc=service  p.resolved
-    =/  parsed  (parse-object-body req-body)
-    ?:  ?=(%| -.parsed)  (give-err eyre-id 400 p.parsed)
-    =/  jon  p.parsed
-    ?>  ?=([%o *] jon)
-    ?.  (has-key p.jon 'proofs')  (give-err eyre-id 400 'missing-proofs')
-    =/  proofs  (get-array p.jon 'proofs')
-    ?:  (gth (lent proofs) max-batch)  (give-err eyre-id 400 'batch-too-large')
-    =/  results  (service-check svc proofs)
-    =/  result-json=(list json)
-      %+  turn  results
-      |=  [secret=@t valid=? spent=?]
-      %-  pairs:enjs:format
-      :~  ['secret' s+secret]
-          ['valid' b+valid]
-          ['spent' b+spent]
-      ==
-    %-  give-json  :_  eyre-id
-    (pairs:enjs:format ['results' [%a result-json]]~)
-  ::
-  ::  POST /services/v1/{name}/redeem — verify and mark spent (idempotent).
-  ::
-  ::    Each proof is crypto-checked against the service's keyset. Any
-  ::    invalid proof (bad signature or wrong keyset) → 400 for the whole
-  ::    batch. Otherwise each token gets a per-element status in the
-  ::    response:
-  ::
-  ::      %fresh   — first time we've seen this secret; spend it.
-  ::      %replay  — already in cred-spent; leave state alone, return 200.
-  ::
-  ::    Replay makes the endpoint safe to retry after network drops. Callers
-  ::    that care about first-use-vs-retry semantics can inspect the per-
-  ::    token `status` field; callers that don't can treat any 200 as
-  ::    "token accepted".
-  ::
-  ++  svc-post-redeem
-    |=  [eyre-id=@ta name=@t req-body=(unit octs)]
-    ^-  (quip card state-0)
-    =/  resolved  (resolve-service name)
-    ?:  ?=(%| -.resolved)  :_  st  (give-err eyre-id 400 p.resolved)
-    =/  svc=service  p.resolved
-    =/  parsed  (parse-object-body req-body)
-    ?:  ?=(%| -.parsed)  :_  st  (give-err eyre-id 400 p.parsed)
-    =/  jon  p.parsed
-    ?>  ?=([%o *] jon)
-    ?.  (has-key p.jon 'proofs')  :_  st  (give-err eyre-id 400 'missing-proofs')
-    =/  proofs   (get-array p.jon 'proofs')
-    ?:  (gth (lent proofs) max-batch)  :_  st  (give-err eyre-id 400 'batch-too-large')
-    =/  results  (service-check svc proofs)
-    ?:  (lien results |=([s=@t v=? sp=?] !v))
-      :_  st  (give-err eyre-id 400 'invalid-service-token')
-    ::  All proofs here share ks-id.svc; de-dup on secret so two identical
-    ::  secrets in one batch can't both read unspent and both be counted.
-    ?:  (has-dup-secrets (turn results |=([s=@t v=? sp=?] [ks-id.svc s])))
-      :_  st  (give-err eyre-id 400 'duplicate-service-token')
-    =/  fresh-secrets=(list @t)
-      %+  murn  results
-      |=  [s=@t v=? sp=?]
-      ?:(sp ~ `s)
-    =.  cred-spent.st
-      %-  ~(gas in cred-spent.st)
-      (turn fresh-secrets |=(s=@t [ks-id.svc s]))
-    =.  services.st
-      %+  ~(put by services.st)  name
-      svc(redeemed (add redeemed.svc (lent fresh-secrets)))
-    =/  result-json=(list json)
-      %+  turn  results
-      |=  [secret=@t valid=? spent=?]
-      %-  pairs:enjs:format
-      :~  ['secret' s+secret]
-          ['status' s+?:(spent 'replay' 'fresh')]
-      ==
-    :_  st
-    %-  give-json  :_  eyre-id
-    (pairs:enjs:format ['redeemed' [%a result-json]]~)
-  ::
-  ::  ============================================================
-  ::  Services — admin endpoints
-  ::  ============================================================
+  ::  -- admin: services --
   ::
   ++  admin-svc-list
     |=  eyre-id=@ta
     ^-  (list card)
-    =/  list=(list json)
-      %+  turn  ~(tap by services.st)
-      |=  [name=@t svc=service]
-      (service-to-json-admin svc)
-    (give-json (pairs:enjs:format ['services' [%a list]]~) eyre-id)
+    =/  svcs  (turn ~(val by services.st) service-to-json-admin)
+    (give-json (pairs:enjs:format ['services' a+svcs]~) eyre-id)
   ::
   ++  admin-svc-detail
     |=  [eyre-id=@ta name=@t]
     ^-  (list card)
-    =/  maybe-svc  (~(get by services.st) name)
-    ?~  maybe-svc  (give-err eyre-id 404 'service-not-found')
-    (give-json (service-to-json-admin u.maybe-svc) eyre-id)
+    =/  svc  (~(get by services.st) name)
+    ?~  svc  (give-err eyre-id 404 'service-not-found')
+    (give-json (service-to-json-admin u.svc) eyre-id)
   ::
-  ::  POST .../allowlist/add — add an access key to a service
-  ::
-  ++  admin-svc-allowlist-add
-    |=  [eyre-id=@ta req-body=(unit octs)]
-    ^-  (quip card state-0)
-    =/  parsed  (parse-object-body req-body)
-    ?:  ?=(%| -.parsed)  :_(st (give-err eyre-id 400 p.parsed))
-    =/  jon  p.parsed
-    ?>  ?=([%o *] jon)
-    =/  name=@t  (get-str p.jon 'name')
-    =/  key=@t   (get-str p.jon 'key')
-    ?:  =('' name)  :_(st (give-err eyre-id 400 'missing-name'))
-    ?:  =('' key)   :_(st (give-err eyre-id 400 'missing-key'))
-    =/  maybe-svc  (~(get by services.st) name)
-    ?~  maybe-svc  :_(st (give-err eyre-id 404 'service-not-found'))
-    =/  svc=service  u.maybe-svc
-    =.  allowlist.svc  (~(put in allowlist.svc) key)
-    =.  services.st    (~(put by services.st) name svc)
-    :_  st
-    (give-json (service-to-json-admin svc) eyre-id)
-  ::
-  ::  POST .../allowlist/remove — remove an access key
-  ::
-  ++  admin-svc-allowlist-remove
-    |=  [eyre-id=@ta req-body=(unit octs)]
-    ^-  (quip card state-0)
-    =/  parsed  (parse-object-body req-body)
-    ?:  ?=(%| -.parsed)  :_(st (give-err eyre-id 400 p.parsed))
-    =/  jon  p.parsed
-    ?>  ?=([%o *] jon)
-    =/  name=@t  (get-str p.jon 'name')
-    =/  key=@t   (get-str p.jon 'key')
-    ?:  =('' name)  :_(st (give-err eyre-id 400 'missing-name'))
-    ?:  =('' key)   :_(st (give-err eyre-id 400 'missing-key'))
-    =/  maybe-svc  (~(get by services.st) name)
-    ?~  maybe-svc  :_(st (give-err eyre-id 404 'service-not-found'))
-    =/  svc=service  u.maybe-svc
-    =.  allowlist.svc  (~(del in allowlist.svc) key)
-    =.  services.st    (~(put by services.st) name svc)
-    :_  st
-    (give-json (service-to-json-admin svc) eyre-id)
-  ::
-  ::  POST .../create — auto-generates a fresh cred-keyset for the service
-  ::
+  ::  POST .../create: a new service and its own fresh keyset. expires
+  ::  (unix seconds) and max_issuance are optional: absent or null for
+  ::  none, else a bare non-negative integer.
   ++  admin-svc-create
-    |=  [eyre-id=@ta req-body=(unit octs)]
-    ^-  (quip card state-0)
-    =/  parsed  (parse-object-body req-body)
-    ?:  ?=(%| -.parsed)  :_(st (give-err eyre-id 400 p.parsed))
-    =/  jon  p.parsed
-    ?>  ?=([%o *] jon)
-    =/  name=@t         (get-str p.jon 'name')
-    =/  title=@t        (get-str p.jon 'title')
-    =/  description=@t  (get-str p.jon 'description')
-    ?:  =('' name)   :_(st (give-err eyre-id 400 'missing-name'))
-    ?:  =('' title)  :_(st (give-err eyre-id 400 'missing-title'))
+    |=  [eyre-id=@ta body=(unit octs)]
+    ^-  (quip card state-1)
+    =/  o  (read-obj body)
+    ?:  ?=(%| -.o)  [(give-err eyre-id 400 p.o) st]
+    =/  name   (get-str p.o 'name')
+    =/  title  (get-str p.o 'title')
+    ?:  =('' name)  [(give-err eyre-id 400 'missing-name') st]
+    ?.  (valid-service-name name)  [(give-err eyre-id 400 'invalid-service-name') st]
+    ?:  =('' title)  [(give-err eyre-id 400 'missing-title') st]
     ?:  (~(has by services.st) name)
-      :_(st (give-err eyre-id 409 'service-already-exists'))
-    ::  generate the backing cred-keyset
-    =/  k   (mod (shax (add (mul (shax eny.bowl) (bex 64)) (sham name))) secp-n)
-    =/  k2  ?:(=(0 k) 1 k)
-    =/  priv-map=(map @ud @)    (my [0 k2]~)
-    =/  pub-map=(map @ud @t)    (my [0 (pt-to-hex (pubkey k2))]~)
-    =/  ks-id=@t  (compute-cred-ks-id pub-map)
-    =/  ks=cred-keyset
-      :*  ks-id=ks-id
-          active=%.y
-          keys=pub-map
-          privkeys=priv-map
-          created=now.bowl
-          service-scoped=%.y
-      ==
-    =.  cred-keysets.st  (~(put by cred-keysets.st) ks-id ks)
-    ::  optional expires / max-issuance
-    =/  expires=(unit @da)
-      ?.  (has-key p.jon 'expires')  ~
-      `(add ~1970.1.1 (mul ~s1 (get-num p.jon 'expires')))
-    =/  max-issuance=(unit @ud)
-      ?.  (has-key p.jon 'max_issuance')  ~
-      `(get-num p.jon 'max_issuance')
+      [(give-err eyre-id 409 'service-already-exists') st]
+    =/  exp  (opt-ud (~(gut by p.o) 'expires' ~))
+    ?~  exp  [(give-err eyre-id 400 'invalid-expires') st]
+    =/  max  (opt-ud (~(gut by p.o) 'max_issuance' ~))
+    ?~  max  [(give-err eyre-id 400 'invalid-max-issuance') st]
+    =/  ks  (gen-cred-keyset eny.bowl now.bowl &)
     =/  svc=service
-      :*  name=name
-          title=title
-          description=description
-          kind=%single-use
-          ks-id=ks-id
-          active=%.y
-          expires=expires
-          max-issuance=max-issuance
-          issued=0
-          redeemed=0
-          created=now.bowl
-          allowlist=*(set @t)
+      :*  name
+          title
+          (get-str p.o 'description')
+          %single-use
+          ks-id.ks
+          &
+          (bind u.exp unix-to-da)
+          u.max
+          0
+          0
+          now.bowl
+          ~
       ==
+    =.  cred-keysets.st  (~(put by cred-keysets.st) ks-id.ks ks)
     =.  services.st  (~(put by services.st) name svc)
-    :_  st
-    (give-json (service-to-json svc) eyre-id)
+    [(give-json (service-to-json svc) eyre-id) st]
   ::
-  ::  POST .../update — change title/description/expires/max-issuance
-  ::
+  ::  POST .../update: change title, description, expires or max_issuance.
+  ::  An absent field is left alone; null clears expires or max_issuance.
   ++  admin-svc-update
-    |=  [eyre-id=@ta req-body=(unit octs)]
-    ^-  (quip card state-0)
-    =/  parsed  (parse-object-body req-body)
-    ?:  ?=(%| -.parsed)  :_(st (give-err eyre-id 400 p.parsed))
-    =/  jon  p.parsed
-    ?>  ?=([%o *] jon)
-    =/  name=@t  (get-str p.jon 'name')
-    ?:  =('' name)  :_(st (give-err eyre-id 400 'missing-name'))
-    =/  maybe-svc  (~(get by services.st) name)
-    ?~  maybe-svc  :_(st (give-err eyre-id 404 'service-not-found'))
-    =/  svc=service  u.maybe-svc
-    =?  title.svc        (has-key p.jon 'title')         (get-str p.jon 'title')
-    =?  description.svc  (has-key p.jon 'description')   (get-str p.jon 'description')
-    =?  expires.svc      (has-key p.jon 'expires')
-      `(add ~1970.1.1 (mul ~s1 (get-num p.jon 'expires')))
-    =?  max-issuance.svc  (has-key p.jon 'max_issuance')
-      `(get-num p.jon 'max_issuance')
-    =.  services.st  (~(put by services.st) name svc)
-    :_  st
-    (give-json (service-to-json svc) eyre-id)
+    |=  [eyre-id=@ta body=(unit octs)]
+    ^-  (quip card state-1)
+    =/  r  (read-svc body)
+    ?:  ?=(%| -.r)  [(give-err eyre-id p.r) st]
+    =/  o  o.p.r
+    =/  svc  svc.p.r
+    =/  exp  (opt-ud (~(gut by o) 'expires' ~))
+    ?~  exp  [(give-err eyre-id 400 'invalid-expires') st]
+    =/  max  (opt-ud (~(gut by o) 'max_issuance' ~))
+    ?~  max  [(give-err eyre-id 400 'invalid-max-issuance') st]
+    =?  title.svc  (has-key o 'title')  (get-str o 'title')
+    =?  description.svc  (has-key o 'description')  (get-str o 'description')
+    =?  expires.svc  (has-key o 'expires')  (bind u.exp unix-to-da)
+    =?  max-issuance.svc  (has-key o 'max_issuance')  u.max
+    =.  services.st  (~(put by services.st) name.svc svc)
+    [(give-json (service-to-json svc) eyre-id) st]
   ::
-  ++  admin-svc-activate
-    |=  [eyre-id=@ta req-body=(unit octs)]
-    ^-  (quip card state-0)
-    =/  parsed  (parse-object-body req-body)
-    ?:  ?=(%| -.parsed)  :_(st (give-err eyre-id 400 p.parsed))
-    =/  jon  p.parsed
-    ?>  ?=([%o *] jon)
-    =/  name=@t  (get-str p.jon 'name')
-    ?:  =('' name)  :_(st (give-err eyre-id 400 'missing-name'))
-    =/  maybe-svc  (~(get by services.st) name)
-    ?~  maybe-svc  :_(st (give-err eyre-id 404 'service-not-found'))
-    =.  services.st  (~(put by services.st) name u.maybe-svc(active %.y))
-    :_  st
-    %-  give-json  :_  eyre-id
-    (pairs:enjs:format ['name' s+name] ['active' b+%.y] ~)
+  ::  POST .../activate (on) or .../deactivate
+  ++  admin-svc-set
+    |=  [eyre-id=@ta body=(unit octs) on=?]
+    ^-  (quip card state-1)
+    =/  r  (read-svc body)
+    ?:  ?=(%| -.r)  [(give-err eyre-id p.r) st]
+    =/  name  name.svc.p.r
+    =.  services.st  (~(put by services.st) name svc.p.r(active on))
+    [(give-json (pairs:enjs:format ~[['name' s+name] ['active' b+on]]) eyre-id) st]
   ::
-  ++  admin-svc-deactivate
-    |=  [eyre-id=@ta req-body=(unit octs)]
-    ^-  (quip card state-0)
-    =/  parsed  (parse-object-body req-body)
-    ?:  ?=(%| -.parsed)  :_(st (give-err eyre-id 400 p.parsed))
-    =/  jon  p.parsed
-    ?>  ?=([%o *] jon)
-    =/  name=@t  (get-str p.jon 'name')
-    ?:  =('' name)  :_(st (give-err eyre-id 400 'missing-name'))
-    =/  maybe-svc  (~(get by services.st) name)
-    ?~  maybe-svc  :_(st (give-err eyre-id 404 'service-not-found'))
-    =.  services.st  (~(put by services.st) name u.maybe-svc(active %.n))
-    :_  st
-    %-  give-json  :_  eyre-id
-    (pairs:enjs:format ['name' s+name] ['active' b+%.n] ~)
-  ::
-  ::  POST .../delete — only if inactive and unused
-  ::
+  ::  POST .../delete: only if inactive and it never issued. Its keyset
+  ::  signed nothing and now backs nothing, so it is retired too.
   ++  admin-svc-delete
-    |=  [eyre-id=@ta req-body=(unit octs)]
-    ^-  (quip card state-0)
-    =/  parsed  (parse-object-body req-body)
-    ?:  ?=(%| -.parsed)  :_(st (give-err eyre-id 400 p.parsed))
-    =/  jon  p.parsed
-    ?>  ?=([%o *] jon)
-    =/  name=@t  (get-str p.jon 'name')
-    ?:  =('' name)  :_(st (give-err eyre-id 400 'missing-name'))
-    =/  maybe-svc  (~(get by services.st) name)
-    ?~  maybe-svc  :_(st (give-err eyre-id 404 'service-not-found'))
-    =/  svc=service  u.maybe-svc
-    ?:  active.svc     :_(st (give-err eyre-id 400 'deactivate-before-delete'))
-    ?:  (gth issued.svc 0)
-      :_(st (give-err eyre-id 400 'service-has-issued-tokens'))
-    =.  services.st  (~(del by services.st) name)
-    :_  st
-    %-  give-json  :_  eyre-id
-    (pairs:enjs:format ['deleted' b+%.y] ['name' s+name] ~)
+    |=  [eyre-id=@ta body=(unit octs)]
+    ^-  (quip card state-1)
+    =/  r  (read-svc body)
+    ?:  ?=(%| -.r)  [(give-err eyre-id p.r) st]
+    =/  svc  svc.p.r
+    ?:  active.svc  [(give-err eyre-id 400 'deactivate-before-delete') st]
+    ?:  (gth issued.svc 0)  [(give-err eyre-id 400 'service-has-issued-tokens') st]
+    =.  services.st  (~(del by services.st) name.svc)
+    =.  cred-keysets.st  (retire-orphans cred-keysets.st services.st)
+    [(give-json (pairs:enjs:format ~[['deleted' b+&] ['name' s+name.svc]]) eyre-id) st]
   ::
-  ::  -- HTTP response helpers --
-  ::
-  ++  give-json
-    |=  [jon=json eyre-id=@ta]
-    ^-  (list card)
-    =/  bod  (as-octs:mimes:html (en:json:html jon))
-    (give-http eyre-id 200 [['content-type' 'application/json'] ~] `bod)
-  ++  give-err
-    |=  [eyre-id=@ta code=@ud msg=@t]
-    ^-  (list card)
-    =/  bod  (as-octs:mimes:html (en:json:html (pairs:enjs:format ['detail' s+msg]~)))
-    (give-http eyre-id code [['content-type' 'application/json'] ~] `bod)
-  ++  give-http
-    |=  [eyre-id=@ta code=@ud hdrs=header-list:http data=(unit octs)]
-    ^-  (list card)
-    =/  sec-hdrs=header-list:http
-      :~  ['content-security-policy' (crip "default-src 'self'; frame-ancestors 'none'")]
-          ['x-frame-options' 'DENY']
-          ['x-content-type-options' 'nosniff']
-      ==
-    =/  all-hdrs=header-list:http  (weld hdrs sec-hdrs)
-    =/  id-path  (welp /http-response (limo [eyre-id ~]))
-    :~  [%give %fact ~[id-path] %http-response-header !>([code all-hdrs])]
-        [%give %fact ~[id-path] %http-response-data !>(data)]
-        [%give %kick ~[id-path] ~]
-    ==
+  ::  POST .../allowlist/add (add) or .../allowlist/remove: an access key
+  ++  admin-svc-allowlist
+    |=  [eyre-id=@ta body=(unit octs) add=?]
+    ^-  (quip card state-1)
+    =/  r  (read-svc body)
+    ?:  ?=(%| -.r)  [(give-err eyre-id p.r) st]
+    =/  key  (get-str o.p.r 'key')
+    ?:  =('' key)  [(give-err eyre-id 400 'missing-key') st]
+    =/  svc  svc.p.r
+    =.  allowlist.svc
+      ?:  add  (~(put in allowlist.svc) key)
+      (~(del in allowlist.svc) key)
+    =.  services.st  (~(put by services.st) name.svc svc)
+    [(give-json (service-to-json-admin svc) eyre-id) st]
   --
 --

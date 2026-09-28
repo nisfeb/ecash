@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Ecash Mint Admin</title>
 <style>
+:root{color-scheme:dark}
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f0a00;color:#e2e8f0;min-height:100vh}
 .hdr{background:#1a1000;border-bottom:1px solid #3d2200;padding:14px 24px;display:flex;align-items:center;gap:12px}
@@ -16,6 +17,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .box{background:#1a1000;border:1px solid #3d2200;border-radius:10px;padding:16px}
 .num{font-size:1.8rem;font-weight:700;color:#f7931a}
 .num.sm{font-size:.9rem;word-break:break-all}
+.num.neg{color:#fca5a5}
 .lbl{color:#94a3b8;font-size:.8rem;margin-top:4px}
 .card{background:#1a1000;border:1px solid #3d2200;border-radius:10px;margin-bottom:16px}
 .ch{padding:14px 18px;border-bottom:1px solid #3d2200;display:flex;align-items:center;justify-content:space-between;font-weight:600;font-size:.95rem}
@@ -25,6 +27,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .tab.on{background:#f7931a;color:#0f0a00;font-weight:700}
 .tab:hover:not(.on){color:#f7931a}
 .sec{display:none}.sec.on{display:block}
+.lnk{background:none;border:none;padding:0;font:inherit;color:inherit;cursor:pointer;text-align:left}
+.lnk:hover{text-decoration:underline}
+.tw{overflow-x:auto}
 .tbl{width:100%;border-collapse:collapse}
 .tbl th{text-align:left;padding:10px 12px;background:#0f0a00;color:#94a3b8;font-size:.78rem;text-transform:uppercase;letter-spacing:.5px;font-weight:600}
 .tbl td{padding:10px 12px;border-top:1px solid #1f1500;font-size:.85rem}
@@ -37,16 +42,14 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .b-issued{background:#1e1b4b;color:#a78bfa}
 .b-pending{background:#3d1a00;color:#fb923c}
 .b-expired{background:#1f2937;color:#9ca3af}
-.b-spent{background:#7f1d1d;color:#fca5a5}
-.b-unspent{background:#062e16;color:#34d399}
 .mono{font-family:'SF Mono',Consolas,monospace;font-size:.8rem}
 .muted{color:#64748b}
 .accent{color:#f7931a}
 .kgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:8px}
-.ki{background:#0f0a00;border:1px solid #3d2200;border-radius:8px;padding:10px;text-align:center;cursor:pointer;transition:border-color .15s}
+.ki{background:#0f0a00;border:1px solid #3d2200;border-radius:8px;padding:10px;text-align:center;cursor:pointer;transition:border-color .15s;font:inherit;color:inherit}
 .ki:hover{border-color:#f7931a}
-.ka{font-size:1rem;font-weight:700;color:#f7931a}
-.kp{font-size:.6rem;color:#64748b;word-break:break-all;margin-top:4px}
+.ka{display:block;font-size:1rem;font-weight:700;color:#f7931a}
+.kp{display:block;font-size:.6rem;color:#64748b;word-break:break-all;margin-top:4px}
 .btn{padding:8px 16px;background:#f7931a;color:#0f0a00;border:none;border-radius:8px;cursor:pointer;font-size:.82rem;font-weight:700;transition:all .15s;white-space:nowrap}
 .btn:hover{background:#e8840f}
 .btn:disabled{background:#3d2200;color:#64748b;cursor:not-allowed}
@@ -57,12 +60,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .btn-danger:hover{background:#991b1b}
 .rbtn{background:transparent;border:1px solid #3d2200;color:#94a3b8;padding:5px 10px;border-radius:6px;cursor:pointer;font-size:.78rem}
 .rbtn:hover{border-color:#f7931a;color:#f7931a}
+.rbtn:disabled{opacity:.4;cursor:not-allowed}
+.rbtn-bad{color:#fca5a5;border-color:#7f1d1d}
 .fld{display:flex;flex-direction:column;gap:4px;margin-bottom:12px}
 .fld label{font-size:.8rem;color:#94a3b8}
-.fld input,.fld select,.fld textarea{width:100%;background:#0f0a00;border:1px solid #3d2200;color:#e2e8f0;padding:8px 12px;border-radius:8px;font-size:.85rem;font-family:'SF Mono',Consolas,monospace}
-.fld textarea{min-height:60px;resize:vertical}
-.frow{display:flex;gap:8px;align-items:flex-end}
-.frow .fld{flex:1;margin-bottom:0}
+.fld input,.fld select{width:100%;background:#0f0a00;border:1px solid #3d2200;color:#e2e8f0;padding:8px 12px;border-radius:8px;font-size:.85rem;font-family:'SF Mono',Consolas,monospace}
 .res{margin-top:12px;padding:12px;background:#0f0a00;border:1px solid #3d2200;border-radius:8px;font-family:monospace;font-size:.78rem;white-space:pre-wrap;word-break:break-all;color:#fbbf24;max-height:300px;overflow-y:auto;display:none}
 .res.err{color:#fca5a5;border-color:#7f1d1d;background:#1c0505}
 .res.ok{color:#86efac;border-color:#065f46}
@@ -71,9 +73,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
 .dot-ok{background:#34d399}
 .dot-warn{background:#fbbf24}
-.dot-err{background:#f87171}
 .empty{padding:32px;text-align:center;color:#64748b;font-size:.85rem}
-.detail-back{cursor:pointer;color:#f7931a;font-size:.85rem;margin-bottom:12px;display:inline-block}
+.detail-back{background:none;border:none;padding:0;font:inherit;cursor:pointer;color:#f7931a;font-size:.85rem;margin-bottom:12px;display:inline-block}
 .detail-back:hover{text-decoration:underline}
 .split{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 @media(max-width:768px){.split{grid-template-columns:1fr}.grid{grid-template-columns:repeat(2,1fr)}}
@@ -81,8 +82,6 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .q-filter button{padding:4px 12px;border-radius:14px;font-size:.75rem;border:1px solid #3d2200;background:transparent;color:#94a3b8;cursor:pointer}
 .q-filter button.on{background:#f7931a;color:#0f0a00;border-color:#f7931a;font-weight:600}
 .q-filter button:hover:not(.on){border-color:#f7931a;color:#f7931a}
-.gauge{height:6px;background:#1f1500;border-radius:3px;overflow:hidden;margin-top:8px}
-.gauge-fill{height:100%;background:#f7931a;border-radius:3px;transition:width .3s}
 .val-section{border-left:3px solid #f7931a;padding-left:12px;margin-bottom:16px}
 .val-section .hint-label{color:#f7931a;font-size:.7rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px}
 .srow.danger{border:1px solid #7f1d1d;background:#1a0e0e;border-radius:6px;padding:8px;margin-top:8px}
@@ -110,7 +109,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
   <!-- Overview Tab -->
   <div id="sec-ov" class="sec on">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;font-size:.82rem;color:#94a3b8">
-      <label><input type="checkbox" id="autorefresh" checked> auto-refresh</label> <span id="updated"></span>
+      <label for="autorefresh"><input type="checkbox" id="autorefresh" checked> auto-refresh</label> <span id="updated"></span>
     </div>
     <div class="val-section">
       <div class="hint-label">&#x20BF; Value-bearing</div>
@@ -140,23 +139,23 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
       <div class="cb">
         <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
           <div class="fld" style="flex:1;min-width:140px">
-            <label>Fee Reserve (%)</label>
+            <label for="st-fee-pct">Fee reserve (bps, 100 = 1%)</label>
             <input id="st-fee-pct" type="number" min="0" placeholder="100">
-            <div class="hint">Basis points (100 = 1%)</div>
+            <div class="hint" id="st-fee-eff"></div>
           </div>
           <div class="fld" style="flex:1;min-width:140px">
-            <label>Fee Reserve Min (sats)</label>
+            <label for="st-fee-min">Fee Reserve Min (sats)</label>
             <input id="st-fee-min" type="number" min="0" placeholder="10">
           </div>
           <div class="fld" style="flex:1;min-width:140px">
-            <label>Quote TTL (seconds)</label>
+            <label for="st-ttl">Quote TTL (seconds)</label>
             <input id="st-ttl" type="number" min="60" placeholder="3600">
-            <div class="hint">Default: 3600 (1 hour)</div>
+            <div class="hint">Default: 3600 (1 hour); minimum 60</div>
           </div>
           <button class="btn btn-sm" data-act="updateSettings">Save</button>
         </div>
         <div class="srow danger">
-          <label><input type="checkbox" id="self-enabled"> Enable <code>self</code> mint/melt</label>
+          <label for="self-enabled"><input type="checkbox" id="self-enabled"> Enable <code>self</code> mint/melt</label>
           <span class="warn">&#x26A0; lets anyone mint tokens with no payment — testing only; leave OFF in production</span>
         </div>
         <div class="res" id="st-res"></div>
@@ -167,6 +166,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 
   <!-- Keysets Tab -->
   <div id="sec-ks" class="sec">
+    <div class="res" id="ks-action-res" style="margin:0 0 12px"></div>
     <div id="ks-list-view">
       <div class="card">
         <div class="ch">
@@ -178,10 +178,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
         </div>
         <div class="cb" id="ks-body"><em class="muted">Loading...</em></div>
       </div>
-      <div class="res" id="ks-action-res"></div>
     </div>
     <div id="ks-detail-view" style="display:none">
-      <span class="detail-back" data-act="showKeysetList">&larr; Back to keysets</span>
+      <button class="detail-back" data-act="showKeysetList">&larr; Back to keysets</button>
       <div class="card">
         <div class="ch"><span>Keyset Detail</span></div>
         <div class="cb" id="ks-detail"><em class="muted">Loading...</em></div>
@@ -199,9 +198,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
           <button data-f="mint">Mint</button>
           <button data-f="melt">Melt</button>
           <button data-f="UNPAID">Unpaid</button>
+          <button data-f="PENDING">Pending</button>
           <button data-f="PAID">Paid</button>
           <button data-f="ISSUED">Issued</button>
         </div>
+        <div class="res" id="qt-res" style="margin:0 0 12px"></div>
         <div id="qt-body"><em class="muted">Loading...</em></div>
       </div>
     </div>
@@ -218,8 +219,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
         <div class="ch"><span>Check Token State</span></div>
         <div class="cb">
           <div class="fld">
-            <label>Secret or Y-point (hex)</label>
-            <input id="tk-check-input" placeholder="Enter secret string or 02/03... compressed point">
+            <label for="tk-check-input">Secret or Y-point (hex)</label>
+            <input id="tk-check-input" placeholder="secret string, or 66-hex Y point starting 02/03">
           </div>
           <button class="btn btn-sm" data-act="checkSpent">Check</button>
           <div class="res" id="tk-check-res"></div>
@@ -239,7 +240,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
         <div class="ch"><span>Configure Backend</span></div>
         <div class="cb">
           <div class="fld">
-            <label>Backend Type</label>
+            <label for="ln-type">Backend Type</label>
             <select id="ln-type" data-change="toggleLnFields">
               <option value="lnbits">LNbits</option>
               <option value="lnd">LND</option>
@@ -248,15 +249,15 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
           </div>
           <div id="ln-fields">
             <div class="fld">
-              <label>URL</label>
+              <label for="ln-url">URL</label>
               <input id="ln-url" placeholder="http://localhost:3338">
             </div>
             <div class="fld" id="ln-apikey-field">
-              <label>API Key</label>
+              <label for="ln-apikey">API Key</label>
               <input id="ln-apikey" placeholder="admin API key" type="password">
             </div>
             <div class="fld" id="ln-macaroon-field" style="display:none">
-              <label>Macaroon (hex)</label>
+              <label for="ln-macaroon">Macaroon (hex)</label>
               <input id="ln-macaroon" placeholder="hex-encoded macaroon" type="password">
             </div>
           </div>
@@ -281,11 +282,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
         <div class="ch"><span>Edit Mint Info</span></div>
         <div class="cb">
           <div class="fld">
-            <label>Mint Name</label>
+            <label for="nf-name">Mint Name</label>
             <input id="nf-name" placeholder="ecash-mint">
           </div>
           <div class="fld">
-            <label>Description</label>
+            <label for="nf-desc">Description</label>
             <input id="nf-desc" placeholder="Cashu ecash mint on Urbit">
           </div>
           <button class="btn btn-sm" data-act="updateInfo">Save</button>
@@ -295,29 +296,37 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
     </div>
   </div>
 </div>
-<div class="toast" id="toast">Copied!</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script type="module" nonce="__CSP_NONCE__">
 const ADMIN = "/apps/ecash/admin/api";
-const PUB = "/apps/ecash";
-let allQuotes = [];
+const PAGE = 50;  // quotes rendered per page
+let allQuotes = [], currentFilter = 'all', qPage = 0;
+let activeKeysetId = '';  // from /overview; the keyset the mint signs with
+let curKs = null;         // keyset shown in the detail view
+let selfWas = false;      // self_method_enabled as last read from / saved to the server
 
 // ── Helpers ──────────────────────────────────────────────────
-async function api(base, path, opts) {
-  const r = await fetch(base + path, opts);
-  if (!r.ok) {
-    let detail;
-    try { detail = await r.json(); } catch { detail = await r.text(); }
-    throw new Error(typeof detail === 'object' ? JSON.stringify(detail) : detail || "HTTP " + r.status);
-  }
-  return r.json();
+// Read the body ONCE (a second read throws "body stream already read"). Errors are
+// JSON {detail} normally, but an Eyre/proxy error page may not be JSON at all.
+async function adminApi(path, opts) {
+  const r = await fetch(ADMIN + path, opts);
+  const text = await r.text();
+  let body = null;
+  try { body = JSON.parse(text); } catch {}
+  if (!r.ok) throw new Error(body && body.detail != null ? String(body.detail) : "HTTP " + r.status);
+  if (!body || typeof body !== 'object') throw new Error("HTTP " + r.status + ": unexpected non-JSON response");
+  return body;
 }
-const adminApi = (p, o) => api(ADMIN, p, o);
-const pubApi = (p, o) => api(PUB, p, o);
+const post = (p, b) => adminApi(p, {
+  method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(b || {})
+});
 
 const esc = (s) => String(s == null ? '' : s)
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   .replace(/'/g, '&#39;').replace(/"/g, '&quot;');
+
+const errBox = (e) => `<div class="res err" style="display:block">${esc(e.message)}</div>`;
 
 function box(val, label, cls) {
   const isLong = String(val).length > 16;
@@ -328,15 +337,6 @@ function badge(text, type) {
   return `<span class="badge b-${type}">${esc(text)}</span>`;
 }
 
-function timeAgo(unix) {
-  if (!unix) return '?';
-  const secs = Math.floor(Date.now() / 1000) - unix;
-  if (secs < 60) return secs + 's ago';
-  if (secs < 3600) return Math.floor(secs / 60) + 'm ago';
-  if (secs < 86400) return Math.floor(secs / 3600) + 'h ago';
-  return Math.floor(secs / 86400) + 'd ago';
-}
-
 function fmtDate(unix) {
   if (!unix) return '?';
   return new Date(unix * 1000).toLocaleString();
@@ -344,16 +344,39 @@ function fmtDate(unix) {
 
 function truncId(id, n) {
   if (!id) return '?';
+  id = String(id);
   n = n || 16;
   return id.length > n ? id.slice(0, n) + '...' : id;
 }
 
+// A keyboard-reachable "click to copy" value. n = truncate length (0 = full).
+const copyBtn = (v, n, cls) =>
+  `<button class="lnk mono ${cls || ''}" data-act="copyText" data-arg="${esc(v)}" title="Copy ${esc(v)}">${esc(n ? truncId(v, n) : v)}</button>`;
+
 function copyText(t) {
-  navigator.clipboard.writeText(t).then(() => {
-    const toast = document.getElementById("toast");
-    toast.style.opacity = "1";
-    setTimeout(() => { toast.style.opacity = "0"; }, 1500);
-  });
+  if (navigator.clipboard) navigator.clipboard.writeText(t).then(() => toast('Copied!'), () => copyFallback(t));
+  else copyFallback(t);
+}
+// navigator.clipboard only exists in secure contexts (not plain HTTP on a LAN IP).
+function copyFallback(t) {
+  const ta = document.createElement('textarea');
+  ta.value = t;
+  ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch {}
+  ta.remove();
+  if (ok) toast('Copied!'); else prompt('Copy this value:', t);
+}
+
+let toastTimer;
+function toast(msg) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.style.opacity = "1";
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.style.opacity = "0"; }, 1500);
 }
 
 function showResult(elId, text, type) {
@@ -363,6 +386,14 @@ function showResult(elId, text, type) {
   el.textContent = text;
 }
 
+// Strong confirmation for destructive money actions: the operator must type `word`.
+function typedConfirm(msg, word) {
+  const v = prompt(msg + '\n\nType ' + word + ' to confirm:');
+  if (v === null) return false;
+  if (v.trim() !== word) { alert('Confirmation did not match. Nothing was done.'); return false; }
+  return true;
+}
+
 // ── Tab Switching ────────────────────────────────────────────
 document.querySelectorAll("#main-tabs .tab").forEach(btn => {
   btn.addEventListener("click", () => {
@@ -370,35 +401,12 @@ document.querySelectorAll("#main-tabs .tab").forEach(btn => {
     document.querySelectorAll(".sec").forEach(s => s.classList.remove("on"));
     btn.classList.add("on");
     document.getElementById("sec-" + btn.dataset.tab).classList.add("on");
-    if (btn.dataset.tab === 'ov') { loadOverview(); startAuto(loadOverview); }
-    else stopAuto();
+    if (btn.dataset.tab === 'ov') loadOverview();
   });
 });
 
-// ── Stats Bar ────────────────────────────────────────────────
-async function loadStats() {
-  try {
-    const d = await adminApi("/overview");
-    const statsEl = document.getElementById("stats");
-    const outstanding = (d.total_issued_sats || 0) - (d.total_redeemed_sats || 0);
-    statsEl.innerHTML =
-      box(d.tokens_issued || 0, "Tokens Issued") +
-      box(d.spent_count || 0, "Tokens Spent") +
-      box((d.total_issued_sats || 0).toLocaleString(), "Issued (sats)") +
-      box((d.total_redeemed_sats || 0).toLocaleString(), "Redeemed (sats)") +
-      box(outstanding.toLocaleString(), "Outstanding (sats)") +
-      box(d.ln_backend?.configured ? d.ln_backend.type : "none", "LN Backend") +
-      box(d.pending_requests || 0, "Pending Requests");
-
-    document.getElementById("sta").textContent = "Online";
-    document.getElementById("sta").style.color = "#34d399";
-  } catch(e) {
-    document.getElementById("sta").textContent = "Error: " + e.message;
-    document.getElementById("sta").style.color = "#fca5a5";
-  }
-}
-
 // ── Auto-refresh (shared) ────────────────────────────────────
+// Runs on every tab: the stats bar and the Online/Error status are global.
 let _ar = null, _arAt = 0;
 function startAuto(loader, sec) {
   stopAuto();
@@ -415,31 +423,44 @@ setInterval(() => {
   if (el && _arAt) { const s = Math.round((Date.now() - _arAt) / 1000); el.textContent = `updated ${s}s ago`; }
 }, 1000);
 
-// ── Overview Tab ─────────────────────────────────────────────
+// ── Overview + Stats Bar (one /overview fetch renders both) ──
 async function loadOverview(silent) {
+  const sta = document.getElementById("sta");
   try {
     const d = await adminApi("/overview");
+    activeKeysetId = d.active_keyset || '';
 
-    // Outstanding liability (issued − redeemed)
-    const issued = d.total_issued_sats || 0;
-    const redeemed = d.total_redeemed_sats || 0;
+    // Outstanding liability (issued − redeemed). Can go negative after a revoke.
+    const issued = Number(d.total_issued_sats) || 0;
+    const redeemed = Number(d.total_redeemed_sats) || 0;
     const outstanding = issued - redeemed;
+
+    document.getElementById("stats").innerHTML =
+      box(d.tokens_issued || 0, "Tokens Issued") +
+      box(d.spent_count || 0, "Tokens Spent") +
+      box(issued.toLocaleString(), "Issued (sats)") +
+      box(redeemed.toLocaleString(), "Redeemed (sats)") +
+      box(outstanding.toLocaleString(), "Outstanding (sats)", outstanding < 0 ? 'neg' : '') +
+      box(d.ln_backend?.configured ? d.ln_backend.type : "none", "LN Backend") +
+      box(d.pending_requests || 0, "Pending Requests");
+
     document.getElementById("ov-liability").innerHTML = `
       <div style="display:flex;gap:32px;flex-wrap:wrap;align-items:flex-end">
         <div>
-          <div class="num">${outstanding.toLocaleString()}</div>
+          <div class="num ${outstanding < 0 ? 'neg' : ''}">${esc(outstanding.toLocaleString())}</div>
           <div class="lbl">Outstanding (sats)</div>
         </div>
         <div>
-          <div class="num sm" style="font-size:1.1rem">${issued.toLocaleString()}</div>
+          <div class="num sm" style="font-size:1.1rem">${esc(issued.toLocaleString())}</div>
           <div class="lbl">Issued (sats)</div>
         </div>
         <div>
-          <div class="num sm" style="font-size:1.1rem">${redeemed.toLocaleString()}</div>
+          <div class="num sm" style="font-size:1.1rem">${esc(redeemed.toLocaleString())}</div>
           <div class="lbl">Redeemed (sats)</div>
         </div>
       </div>
       <div class="hint" style="margin-top:8px">Outstanding = issued − redeemed. This is the mint's live token liability.</div>
+      ${outstanding < 0 ? '<div class="hint" style="color:#fca5a5">Negative: more was redeemed than is recorded as issued (e.g. tokens from a revoked ISSUED quote were redeemed after all).</div>' : ''}
     `;
 
     // Mint quotes summary
@@ -447,12 +468,12 @@ async function loadOverview(silent) {
     const mqTotal = (mq.unpaid||0) + (mq.paid||0) + (mq.issued||0) + (mq.pending||0);
     document.getElementById("ov-mint-quotes").innerHTML = `
       <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:8px">
-        <div>${badge("UNPAID", "unpaid")} <strong>${mq.unpaid||0}</strong></div>
-        <div>${badge("PAID", "paid")} <strong>${mq.paid||0}</strong></div>
-        <div>${badge("ISSUED", "issued")} <strong>${mq.issued||0}</strong></div>
-        <div>${badge("PENDING", "pending")} <strong>${mq.pending||0}</strong></div>
+        <div>${badge("UNPAID", "unpaid")} <strong>${esc(mq.unpaid||0)}</strong></div>
+        <div>${badge("PAID", "paid")} <strong>${esc(mq.paid||0)}</strong></div>
+        <div>${badge("ISSUED", "issued")} <strong>${esc(mq.issued||0)}</strong></div>
+        <div>${badge("PENDING", "pending")} <strong>${esc(mq.pending||0)}</strong></div>
       </div>
-      <div class="muted" style="font-size:.78rem">Total: ${mqTotal} quotes</div>
+      <div class="muted" style="font-size:.78rem">Total: ${esc(mqTotal)} quotes</div>
     `;
 
     // Melt quotes summary
@@ -460,39 +481,49 @@ async function loadOverview(silent) {
     const lqTotal = (lq.unpaid||0) + (lq.paid||0) + (lq.pending||0);
     document.getElementById("ov-melt-quotes").innerHTML = `
       <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:8px">
-        <div>${badge("UNPAID", "unpaid")} <strong>${lq.unpaid||0}</strong></div>
-        <div>${badge("PAID", "paid")} <strong>${lq.paid||0}</strong></div>
-        <div>${badge("PENDING", "pending")} <strong>${lq.pending||0}</strong></div>
+        <div>${badge("UNPAID", "unpaid")} <strong>${esc(lq.unpaid||0)}</strong></div>
+        <div>${badge("PAID", "paid")} <strong>${esc(lq.paid||0)}</strong></div>
+        <div>${badge("PENDING", "pending")} <strong>${esc(lq.pending||0)}</strong></div>
       </div>
-      <div class="muted" style="font-size:.78rem">Total: ${lqTotal} quotes</div>
+      <div class="muted" style="font-size:.78rem">Total: ${esc(lqTotal)} quotes</div>
     `;
 
     // Active keyset
     if (d.active_keyset) {
-      const ks = await adminApi("/keysets/" + d.active_keyset);
+      const ks = await adminApi("/keysets/" + encodeURIComponent(d.active_keyset));
       const keys = Object.entries(ks.keys || {}).sort((a,b) => +a[0] - +b[0]);
       document.getElementById("ov-keyset").innerHTML = `
         <div style="margin-bottom:12px">
           ${badge("Active", "active")}
-          <span class="mono accent" style="margin-left:8px;cursor:pointer" data-act="copyText" data-arg="${ks.id}" title="Click to copy">${truncId(ks.id, 24)}</span>
-          <span class="muted" style="margin-left:8px">unit: ${ks.unit || 'sat'}</span>
-          <span class="muted" style="margin-left:8px">fee: ${ks.input_fee_ppk || 0} ppk</span>
-          <span class="muted" style="margin-left:8px">created: ${fmtDate(ks.created)}</span>
+          <span style="margin-left:8px">${copyBtn(ks.id, 24, 'accent')}</span>
+          <span class="muted" style="margin-left:8px">unit: ${esc(ks.unit || 'sat')}</span>
+          <span class="muted" style="margin-left:8px">fee: ${esc(ks.input_fee_ppk || 0)} ppk</span>
+          <span class="muted" style="margin-left:8px">created: ${esc(fmtDate(ks.created))}</span>
         </div>
         <div class="kgrid">
-          ${keys.map(([a,p]) => `<div class="ki" data-act="copyText" data-arg="${p}" title="${p}"><div class="ka">${a}</div><div class="kp">${truncId(p,14)}</div></div>`).join("")}
+          ${keys.map(([a,p]) => `<button class="ki" data-act="copyText" data-arg="${esc(p)}" title="Copy ${esc(p)}"><span class="ka">${esc(a)}</span><span class="kp">${esc(truncId(p,14))}</span></button>`).join("")}
         </div>
         <div class="hint" style="margin-top:8px">Click denomination to copy public key</div>
       `;
     } else {
       document.getElementById("ov-keyset").innerHTML = '<div class="empty">No active keyset</div>';
     }
+    sta.textContent = "Online";
+    sta.style.color = "#34d399";
     stampUpdated();
   } catch(e) {
-    if (!silent) document.getElementById("ov-keyset").innerHTML = `<div class="res err" style="display:block">${e.message}</div>`;
+    sta.textContent = "Error: " + e.message;
+    sta.style.color = "#fca5a5";
+    if (!silent) document.getElementById("ov-keyset").innerHTML = errBox(e);
   }
 }
-window.loadOverview = loadOverview;
+
+// ── Settings ─────────────────────────────────────────────────
+function showFeeEff() {
+  const v = parseInt(document.getElementById("st-fee-pct").value, 10);
+  document.getElementById("st-fee-eff").textContent = isNaN(v) ? '' : '= ' + (v / 100).toFixed(2) + '% of the melt amount';
+}
+document.getElementById("st-fee-pct").addEventListener("input", showFeeEff);
 
 async function loadSettings() {
   try {
@@ -500,11 +531,18 @@ async function loadSettings() {
     document.getElementById("st-fee-pct").value = d.fee_reserve_pct ?? 100;
     document.getElementById("st-fee-min").value = d.fee_reserve_min ?? 10;
     document.getElementById("st-ttl").value = d.quote_ttl_secs ?? 3600;
-    document.getElementById('self-enabled').checked = !!d.self_method_enabled;
+    selfWas = !!d.self_method_enabled;
+    document.getElementById('self-enabled').checked = selfWas;
+    showFeeEff();
   } catch(e) {
     showResult("st-res", "Error loading settings: " + e.message, "err");
   }
 }
+
+const SELF_WARN = 'Turn ON self mint/melt?\n\n' +
+  'Self-minting creates FREE, UNBACKED tokens: anyone who can reach this mint can mint ecash without paying anything. ' +
+  'Those tokens can then be melted over Lightning, draining real funds.\n\n' +
+  'It must NEVER be on for a mint with real Lightning funds. Testing only.\n\nEnable it?';
 
 async function updateSettings() {
   const pct = parseInt(document.getElementById("st-fee-pct").value);
@@ -512,24 +550,26 @@ async function updateSettings() {
   const ttl = parseInt(document.getElementById("st-ttl").value);
   if (isNaN(pct) || isNaN(min) || isNaN(ttl)) { alert('All fields required'); return; }
   if (ttl < 60) { alert('TTL must be at least 60 seconds'); return; }
-  const selfOn = document.getElementById('self-enabled').checked;
-  if (selfOn && !confirm('Enable self-mint? Anyone can then mint tokens for free. Testing only.')) return;
+  const selfBox = document.getElementById('self-enabled');
+  const selfOn = selfBox.checked;
+  // Warn only on the off→on transition, not on every save while it is already on.
+  if (selfOn && !selfWas && !confirm(SELF_WARN)) { selfBox.checked = false; return; }
   try {
-    const d = await adminApi("/settings", {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({fee_reserve_pct: pct, fee_reserve_min: min, quote_ttl_secs: ttl, self_method_enabled: selfOn})
-    });
+    const d = await post("/settings", {fee_reserve_pct: pct, fee_reserve_min: min, quote_ttl_secs: ttl, self_method_enabled: selfOn});
+    selfWas = !!d.self_method_enabled;
+    selfBox.checked = selfWas;
     const pctDisplay = (d.fee_reserve_pct / 100).toFixed(2);
     const ttlDisplay = d.quote_ttl_secs >= 3600 ? (d.quote_ttl_secs / 3600) + 'h' : (d.quote_ttl_secs / 60) + 'm';
-    showResult("st-res", "Saved: fee " + pctDisplay + "% (min " + d.fee_reserve_min + " sats), TTL " + ttlDisplay, "ok");
+    showResult("st-res", "Saved: fee reserve " + pctDisplay + "% (" + d.fee_reserve_pct + " bps, min " + d.fee_reserve_min +
+      " sats), TTL " + ttlDisplay + ", self mint/melt " + (selfWas ? "ON" : "off"), "ok");
   } catch(e) {
     showResult("st-res", "Error: " + e.message, "err");
   }
 }
-window.updateSettings = updateSettings;
 
 // ── Keysets Tab ──────────────────────────────────────────────
+const isCurrentKs = (k) => activeKeysetId ? k.id === activeKeysetId : !!k.active;
+
 async function loadKeysets() {
   try {
     const d = await adminApi("/keysets");
@@ -539,133 +579,151 @@ async function loadKeysets() {
       return;
     }
     document.getElementById("ks-body").innerHTML = `
-      <table class="tbl">
+      <div class="tw"><table class="tbl">
         <thead><tr>
           <th>ID</th><th>Unit</th><th>Status</th><th>Keys</th><th>Fee (ppk)</th><th>Created</th><th>Actions</th>
         </tr></thead>
         <tbody>
-          ${keysets.map(k => `<tr>
-            <td class="mono accent">${truncId(k.id, 20)}</td>
-            <td>${k.unit || 'sat'}</td>
+          ${keysets.map(k => {
+            const cur = isCurrentKs(k);
+            return `<tr>
+            <td class="mono accent">${esc(truncId(k.id, 20))}</td>
+            <td>${esc(k.unit || 'sat')}</td>
             <td>${k.active ? badge('Active', 'active') : badge('Inactive', 'inactive')}</td>
-            <td>${k.key_count || k.denominations?.length || '?'}</td>
-            <td>${k.input_fee_ppk || 0}</td>
-            <td class="muted">${fmtDate(k.created)}</td>
+            <td>${esc(k.key_count || k.denominations?.length || '?')}</td>
+            <td>${esc(k.input_fee_ppk || 0)}</td>
+            <td class="muted">${esc(fmtDate(k.created))}</td>
             <td style="white-space:nowrap">
-              <button class="rbtn" data-act="viewKeyset" data-arg="${k.id}">View</button>
-              ${k.active
-                ? ''
-                : `<button class="rbtn" style="color:#34d399;border-color:#065f46" data-act="activateKeyset" data-arg="${k.id}">Activate</button>`}
+              <button class="rbtn" data-act="viewKeyset" data-arg="${esc(k.id)}">View</button>
+              ${cur ? '' : `<button class="rbtn" style="color:#34d399;border-color:#065f46" data-act="activateKeyset" data-arg="${esc(k.id)}">Activate</button>`}
+              ${k.active && !cur ? `<button class="rbtn rbtn-bad" data-act="deactivateKeyset" data-arg="${esc(k.id)}">Deactivate</button>` : ''}
             </td>
-          </tr>`).join("")}
+          </tr>`;
+          }).join("")}
         </tbody>
-      </table>
+      </table></div>
     `;
   } catch(e) {
-    document.getElementById("ks-body").innerHTML = `<div class="res err" style="display:block">${e.message}</div>`;
+    document.getElementById("ks-body").innerHTML = errBox(e);
   }
 }
-window.loadKeysets = loadKeysets;
+
+// After any keyset mutation: overview first so activeKeysetId is current.
+async function refreshKeysets() {
+  await loadOverview(true);
+  await loadKeysets();
+}
 
 async function generateKeyset() {
   if (!confirm('Generate a new keyset with random keys? It will be created as inactive.')) return;
   try {
-    const d = await adminApi("/keysets/generate", {method: 'POST'});
+    const d = await post("/keysets/generate");
     showResult("ks-action-res", "Keyset generated: " + d.id + " (" + d.key_count + " keys, inactive)", "ok");
-    await loadKeysets();
-    await loadStats();
+    await refreshKeysets();
   } catch(e) {
     showResult("ks-action-res", "Error: " + e.message, "err");
   }
 }
-window.generateKeyset = generateKeyset;
 
 async function activateKeyset(id) {
   if (!confirm('Activate this keyset? The current active keyset will be deactivated.\n\nID: ' + id)) return;
   try {
-    await adminApi("/keysets/activate", {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({id})
-    });
+    await post("/keysets/activate", {id});
     showResult("ks-action-res", "Keyset activated: " + truncId(id, 24), "ok");
-    await loadKeysets();
-    await loadStats();
+    await refreshKeysets();
+    if (curKs && curKs.id === id) viewKeyset(id);
   } catch(e) {
     showResult("ks-action-res", "Error: " + e.message, "err");
   }
 }
-window.activateKeyset = activateKeyset;
 
-async function setKeysetFee(id, currentFee) {
-  const input = prompt('Set input fee (parts per thousand) for keyset:\n' + id + '\n\nCurrent fee: ' + currentFee + ' ppk', currentFee);
-  if (input === null) return;
-  const fee = parseInt(input);
-  if (isNaN(fee) || fee < 0) { alert('Invalid fee value'); return; }
+async function deactivateKeyset(id) {
+  if (!confirm('Deactivate this keyset? The mint stops signing new outputs with it; tokens already issued under it still redeem.\n\nID: ' + id)) return;
   try {
-    const d = await adminApi("/keysets/set-fee", {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({id, input_fee_ppk: fee})
-    });
-    alert('Fee updated. Keyset ID changed:\n\nOld: ' + d.old_id + '\nNew: ' + d.new_id + '\nFee: ' + d.input_fee_ppk + ' ppk');
-    viewKeyset(d.new_id);
-    await loadStats();
+    await post("/keysets/deactivate", {id});
+    showResult("ks-action-res", "Keyset deactivated: " + truncId(id, 24), "ok");
+    await refreshKeysets();
+    if (curKs && curKs.id === id) viewKeyset(id);
   } catch(e) {
-    alert('Error setting fee: ' + e.message);
+    showResult("ks-action-res", "Error: " + e.message, "err");
   }
 }
-window.setKeysetFee = setKeysetFee;
+
+async function setKeysetFee() {
+  const ks = curKs;
+  if (!ks) return;
+  const currentFee = ks.input_fee_ppk || 0;
+  const input = prompt('Set input fee (parts per thousand) for keyset:\n' + ks.id + '\n\nCurrent fee: ' + currentFee + ' ppk', currentFee);
+  if (input === null) return;
+  const fee = parseInt(input, 10);
+  if (isNaN(fee) || fee < 0) { alert('Invalid fee value'); return; }
+  if (fee !== currentFee && isCurrentKs(ks) && !confirm(
+    'This is the ACTIVE keyset. Changing its fee ROTATES the mint to fresh keys under a NEW keyset id and deactivates this one.\n\n' +
+    'Tokens already issued under the old id still redeem, but wallets must refetch the mint\'s keys before they can mint or swap against the new keyset.\n\nContinue?')) return;
+  try {
+    const d = await post("/keysets/set-fee", {id: ks.id, input_fee_ppk: fee});
+    if (d.old_id === d.new_id) {
+      showResult("ks-action-res", "Fee unchanged (" + d.input_fee_ppk + " ppk): nothing to do, keyset id kept.", "ok");
+    } else {
+      showResult("ks-action-res", "Fee set to " + d.input_fee_ppk + " ppk under fresh keys.\nNew keyset id: " + d.new_id +
+        "\nOld id " + d.old_id + " is now inactive; tokens issued under it still redeem.", "ok");
+    }
+    await refreshKeysets();
+    viewKeyset(d.new_id);
+  } catch(e) {
+    showResult("ks-action-res", "Error setting fee: " + e.message, "err");
+  }
+}
 
 async function viewKeyset(id) {
   document.getElementById("ks-list-view").style.display = "none";
   document.getElementById("ks-detail-view").style.display = "block";
   document.getElementById("ks-detail").innerHTML = '<em class="muted">Loading...</em>';
   try {
-    const ks = await adminApi("/keysets/" + id);
+    const ks = await adminApi("/keysets/" + encodeURIComponent(id));
+    curKs = ks;
+    const cur = isCurrentKs(ks);
     const keys = Object.entries(ks.keys || {}).sort((a,b) => +a[0] - +b[0]);
     document.getElementById("ks-detail").innerHTML = `
       <div style="margin-bottom:16px">
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap">
           ${ks.active ? badge('Active', 'active') : badge('Inactive', 'inactive')}
-          <span class="mono muted" style="font-size:.75rem;cursor:pointer" data-act="copyText" data-arg="${ks.id}" title="Click to copy full ID">${ks.id}</span>
+          ${copyBtn(ks.id, 0, 'muted')}
         </div>
         <div class="muted" style="font-size:.82rem;margin-bottom:12px">
-          Unit: ${ks.unit || 'sat'} &middot; Fee: ${ks.input_fee_ppk || 0} ppk &middot; Created: ${fmtDate(ks.created)}
+          Unit: ${esc(ks.unit || 'sat')} &middot; Fee: ${esc(ks.input_fee_ppk || 0)} ppk &middot; Created: ${esc(fmtDate(ks.created))}
         </div>
         <div style="display:flex;gap:6px;flex-wrap:wrap">
-          ${ks.active
-            ? ''
-            : `<button class="btn btn-sm" style="background:#065f46;color:#34d399" data-act="activateKeyset" data-arg="${ks.id}">Activate</button>`}
-          <button class="btn btn-sm btn-sec" data-act="setKeysetFee" data-arg="${ks.id}" data-arg2="${ks.input_fee_ppk || 0}">Set Fee</button>
+          ${cur ? '' : `<button class="btn btn-sm" style="background:#065f46;color:#34d399" data-act="activateKeyset" data-arg="${esc(ks.id)}">Activate</button>`}
+          ${ks.active && !cur ? `<button class="btn btn-sm btn-danger" data-act="deactivateKeyset" data-arg="${esc(ks.id)}">Deactivate</button>` : ''}
+          <button class="btn btn-sm btn-sec" data-act="setKeysetFee">Set Fee</button>
         </div>
       </div>
       <div style="margin-bottom:8px;font-weight:600;font-size:.85rem">Public Keys (${keys.length} denominations)</div>
-      <table class="tbl">
+      <div class="tw"><table class="tbl">
         <thead><tr><th>Amount (sats)</th><th>Public Key</th><th></th></tr></thead>
         <tbody>
           ${keys.map(([a,p]) => `<tr>
-            <td><strong class="accent">${a}</strong></td>
-            <td class="mono" style="font-size:.72rem">${p}</td>
-            <td><button class="rbtn" data-act="copyText" data-arg="${p}">Copy</button></td>
+            <td><strong class="accent">${esc(a)}</strong></td>
+            <td class="mono" style="font-size:.72rem">${esc(p)}</td>
+            <td><button class="rbtn" data-act="copyText" data-arg="${esc(p)}">Copy</button></td>
           </tr>`).join("")}
         </tbody>
-      </table>
+      </table></div>
     `;
   } catch(e) {
-    document.getElementById("ks-detail").innerHTML = `<div class="res err" style="display:block">${e.message}</div>`;
+    document.getElementById("ks-detail").innerHTML = errBox(e);
   }
 }
-window.viewKeyset = viewKeyset;
 
 function showKeysetList() {
+  curKs = null;  // non-null only while the detail view is open
   document.getElementById("ks-list-view").style.display = "block";
   document.getElementById("ks-detail-view").style.display = "none";
 }
-window.showKeysetList = showKeysetList;
 
 // ── Quotes Tab ──────────────────────────────────────────────
-let currentFilter = 'all';
+const STATE_CLS = {PAID: 'paid', ISSUED: 'issued', PENDING: 'pending'};
 
 async function loadQuotes() {
   try {
@@ -676,68 +734,152 @@ async function loadQuotes() {
     allQuotes.sort((a,b) => (b.created||0) - (a.created||0));
     renderQuotes();
   } catch(e) {
-    document.getElementById("qt-body").innerHTML = `<div class="res err" style="display:block">${e.message}</div>`;
+    document.getElementById("qt-body").innerHTML = errBox(e);
   }
 }
-window.loadQuotes = loadQuotes;
+
+// Offer only what the backend accepts: delete refuses PAID/ISSUED mint quotes and
+// PAID/PENDING melts; revoke is the mint-quote override; abort is for PENDING bolt11 melts.
+function quoteActions(q) {
+  const id = esc(q.quote_id), out = [];
+  const mint = q._type === 'mint';
+  if (!(mint ? ['PAID', 'ISSUED'] : ['PAID', 'PENDING']).includes(q.state))
+    out.push(`<button class="rbtn rbtn-bad" data-act="deleteQuote" data-arg="${id}" data-arg2="${q._type}">Delete</button>`);
+  if (mint && (q.state === 'PAID' || q.state === 'ISSUED'))
+    out.push(`<button class="rbtn rbtn-bad" data-act="revokeQuote" data-arg="${id}">Revoke</button>`);
+  if (!mint && q.state === 'PENDING' && q.method !== 'self')
+    out.push(`<button class="rbtn" data-act="abortMelt" data-arg="${id}">Abort</button>`,
+             `<button class="rbtn rbtn-bad" data-act="forceAbortMelt" data-arg="${id}">Force abort</button>`);
+  return out.join(' ');
+}
 
 function renderQuotes() {
-  let filtered = allQuotes;
-  if (currentFilter === 'mint') filtered = allQuotes.filter(q => q._type === 'mint');
-  else if (currentFilter === 'melt') filtered = allQuotes.filter(q => q._type === 'melt');
-  else if (['UNPAID','PAID','ISSUED'].includes(currentFilter))
-    filtered = allQuotes.filter(q => q.state === currentFilter);
+  const filtered = currentFilter === 'all' ? allQuotes
+    : (currentFilter === 'mint' || currentFilter === 'melt') ? allQuotes.filter(q => q._type === currentFilter)
+    : allQuotes.filter(q => q.state === currentFilter);
 
   if (!filtered.length) {
     document.getElementById("qt-body").innerHTML = '<div class="empty">No quotes match filter</div>';
     return;
   }
 
+  const pages = Math.ceil(filtered.length / PAGE);
+  qPage = Math.max(0, Math.min(qPage, pages - 1));
+  const rows = filtered.slice(qPage * PAGE, qPage * PAGE + PAGE);
+
   document.getElementById("qt-body").innerHTML = `
-    <table class="tbl">
+    <div class="tw"><table class="tbl">
       <thead><tr>
-        <th>Type</th><th>Quote ID</th><th>Amount</th><th>State</th><th>Method</th><th>Created</th><th>Expired</th><th></th>
+        <th>Type</th><th>Quote ID</th><th>Amount</th><th>State</th><th>Method</th><th>Payment hash</th><th>Created</th><th>Expired</th><th></th>
       </tr></thead>
       <tbody>
-        ${filtered.map(q => {
-          const stClass = q.state === 'PAID' ? 'paid' : q.state === 'ISSUED' ? 'issued' : q.state === 'PENDING' ? 'pending' : 'unpaid';
-          const canDelete = !(q._type === 'mint' && q.state === 'ISSUED') && !(q._type === 'melt' && q.state === 'PAID');
-          return `<tr>
+        ${rows.map(q => `<tr>
             <td>${badge(q._type, q._type === 'mint' ? 'active' : 'pending')}</td>
-            <td class="mono" style="cursor:pointer" data-act="copyText" data-arg="${q.quote}" title="${q.quote}">${truncId(q.quote, 16)}</td>
-            <td><strong>${q.amount || '?'}</strong> sats</td>
-            <td>${badge(q.state, stClass)}</td>
-            <td>${q.method || '?'}</td>
-            <td class="muted">${fmtDate(q.created)}</td>
+            <td>${copyBtn(q.quote_id, 16)}</td>
+            <td><strong>${esc(q.amount ?? '?')}</strong> sats</td>
+            <td>${badge(q.state, STATE_CLS[q.state] || 'unpaid')}</td>
+            <td>${esc(q.method || '?')}</td>
+            <td>${q.payment_hash ? copyBtn(q.payment_hash, 12) : '<span class="muted">-</span>'}</td>
+            <td class="muted">${esc(fmtDate(q.created))}</td>
             <td>${q.expired ? badge('Yes', 'expired') : '<span class="muted">No</span>'}</td>
-            <td>${canDelete ? `<button class="rbtn" style="color:#fca5a5;border-color:#7f1d1d" data-act="deleteQuote" data-arg="${q.quote}" data-arg2="${q._type}">Delete</button>` : ''}</td>
-          </tr>`;
-        }).join("")}
+            <td style="white-space:nowrap">${quoteActions(q)}</td>
+          </tr>`).join("")}
       </tbody>
-    </table>
-    <div class="hint" style="margin-top:8px">Showing ${filtered.length} of ${allQuotes.length} quotes. Click quote ID to copy.</div>
+    </table></div>
+    <div class="hint" style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      ${pages > 1 ? `<button class="rbtn" data-act="quotePage" data-arg="-1"${qPage ? '' : ' disabled'}>&larr; Prev</button>
+      <span>Page ${qPage + 1} of ${pages}</span>
+      <button class="rbtn" data-act="quotePage" data-arg="1"${qPage < pages - 1 ? '' : ' disabled'}>Next &rarr;</button>` : ''}
+      <span>Showing ${rows.length} of ${filtered.length} (${allQuotes.length} total). Click an ID or hash to copy.</span>
+    </div>
   `;
+}
+
+function quotePage(delta) { qPage += Number(delta); renderQuotes(); }
+
+const findQuote = (id, type) => allQuotes.find(q => q.quote_id === id && q._type === type);
+
+// Reload after every quote action, success or not: a refusal usually means the state moved.
+async function afterQuoteAction() {
+  await loadQuotes();
+  loadOverview(true);
 }
 
 async function deleteQuote(quoteId, type) {
   if (!confirm('Delete this ' + type + ' quote?\n\nID: ' + quoteId)) return;
   try {
-    await adminApi("/quotes/delete", {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({quote_id: quoteId, type})
-    });
-    await loadQuotes();
-    await loadStats();
+    await post("/quotes/delete", {quote_id: quoteId, type});
+    showResult("qt-res", "Deleted " + type + " quote " + quoteId, "ok");
   } catch(e) {
-    alert('Error deleting quote: ' + e.message);
+    showResult("qt-res", "Delete failed: " + e.message, "err");
   }
+  await afterQuoteAction();
 }
-window.deleteQuote = deleteQuote;
+
+async function revokeQuote(quoteId) {
+  const q = findQuote(quoteId, 'mint') || {};
+  const amt = (q.amount ?? '?') + ' sats';
+  const ok = q.state === 'PAID'
+    ? typedConfirm('REVOKE a PAID mint quote?\n\n' +
+        'The customer has PAID ' + amt + ' for this quote but has NOT minted their tokens yet. ' +
+        'Revoking deletes the quote: they can never mint, and their deposit is destroyed as far as the mint is concerned.\n\n' +
+        'Only do this if you have refunded them some other way or know the payment is bogus.\n\nID: ' + quoteId, 'REVOKE')
+    : confirm('Revoke this ' + (q.state || '') + ' mint quote?\n\n' +
+        'The quote is deleted' + (q.state === 'ISSUED' ? ' and ' + amt + ' is subtracted from total issued: the tokens minted from it are declared never-to-be-redeemed. ' +
+        'If they ARE redeemed later, outstanding liability goes negative.' : '.') + '\n\nID: ' + quoteId);
+  if (!ok) return;
+  try {
+    const d = await post("/quotes/revoke", {quote_id: quoteId});
+    showResult("qt-res", "Revoked mint quote " + d.quote_id + " (was " + d.was_state + "); total issued reduced by " +
+      d.issued_decremented + " sats.", "ok");
+  } catch(e) {
+    showResult("qt-res", "Revoke failed: " + e.message, "err");
+  }
+  await afterQuoteAction();
+}
+
+const ABORT_RESULT = {
+  'settled-not-aborted': 'Lightning shows the payment SETTLED: the quote was marked PAID instead of aborted.',
+  'in-flight-or-unconfirmed': 'Lightning did not confirm a failure (in flight or unknown). Nothing changed; the quote stays PENDING. Force abort only if you KNOW the payment failed.',
+  'aborted-confirmed-failed': "Lightning confirmed the payment FAILED: the customer's inputs were un-spent and the quote reset.",
+  'aborted-forced': "Force-aborted: the customer's inputs were un-spent on your assertion that the payment failed.",
+  'no-op-not-pending': 'The quote is no longer PENDING. Nothing changed.',
+  'no-inflight-record': 'No in-flight record to reverse. Nothing changed.',
+};
+
+async function abortMelt(quoteId, force) {
+  const q = findQuote(quoteId, 'melt') || {};
+  const hash = q.payment_hash || '(none recorded)';
+  const ok = force
+    ? typedConfirm('FORCE-abort this PENDING melt?\n\n' +
+        "DANGER: you are asserting the Lightning payment FAILED and authorizing the mint to un-spend the customer's inputs. " +
+        'If the payment actually went through (or still goes through), the mint pays TWICE.\n\n' +
+        'The mint still re-checks Lightning and settles instead if it sees the payment succeeded, but an in-flight payment ' +
+        'looks the same as a failed one. Only force after verifying on your node that this payment FAILED.\n\n' +
+        'Payment hash: ' + hash + '\nQuote: ' + quoteId, 'FORCE')
+    : confirm('Abort this PENDING melt?\n\nThe mint re-checks the payment on Lightning first:\n' +
+        '- settled: the quote is marked PAID (not aborted)\n' +
+        "- confirmed failed: the customer's inputs are un-spent and the quote reset\n" +
+        '- anything ambiguous: nothing changes\n\nPayment hash: ' + hash + '\nQuote: ' + quoteId);
+  if (!ok) return;
+  try {
+    const d = await post("/melt/abort", force ? {quote_id: quoteId, force: true} : {quote_id: quoteId});
+    const msg = ABORT_RESULT[d.result] || (d.aborted
+      ? "Aborted without a Lightning re-check: the customer's inputs were un-spent."
+      : 'Not aborted' + (d.result ? ': ' + d.result : '.'));
+    showResult("qt-res", msg + "\n\nquote " + (d.quote_id || quoteId) + " | aborted: " + !!d.aborted +
+      " | Lightning checked: " + (d.ln_checked ?? 'n/a'),
+      d.aborted || d.result === 'settled-not-aborted' ? "ok" : "");
+  } catch(e) {
+    showResult("qt-res", "Abort failed: " + e.message, "err");
+  }
+  await afterQuoteAction();
+}
 
 document.getElementById("qt-filter").addEventListener("click", e => {
   if (!e.target.dataset.f) return;
   currentFilter = e.target.dataset.f;
+  qPage = 0;
   document.querySelectorAll("#qt-filter button").forEach(b => b.classList.remove("on"));
   e.target.classList.add("on");
   renderQuotes();
@@ -749,36 +891,33 @@ async function loadSpent() {
     const d = await adminApi("/spent");
     document.getElementById("tk-spent").innerHTML = `
       <div style="display:flex;gap:24px;margin-bottom:8px">
-        <div><span class="muted">Spent secrets:</span> <strong class="accent">${d.spent_count || 0}</strong></div>
-        <div><span class="muted">Spent Y-points:</span> <strong class="accent">${d.spent_ys_count || 0}</strong></div>
+        <div><span class="muted">Spent secrets:</span> <strong class="accent">${esc(d.spent_count || 0)}</strong></div>
+        <div><span class="muted">Spent Y-points:</span> <strong class="accent">${esc(d.spent_ys_count || 0)}</strong></div>
       </div>
       <div class="hint">These counts should match. Spent secrets are checked during swap to prevent double-spending.</div>
     `;
   } catch(e) {
-    document.getElementById("tk-spent").innerHTML = `<div class="res err" style="display:block">${e.message}</div>`;
+    document.getElementById("tk-spent").innerHTML = errBox(e);
   }
 }
-window.loadSpent = loadSpent;
 
 async function checkSpent() {
   const input = document.getElementById("tk-check-input").value.trim();
   if (!input) return;
+  // A compressed point is looked up as Y; anything else is a secret.
+  const isY = /^0[23][0-9a-f]{64}$/i.test(input);
   try {
-    const d = await adminApi("/spent/check", {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({secret: input})
-    });
+    const d = await post("/spent/check", isY ? {Y: input.toLowerCase()} : {secret: input});
+    const what = isY ? "Y-point" : "Secret";
     if (d.spent) {
-      showResult("tk-check-res", "SPENT - This token has been redeemed and cannot be used again.", "err");
+      showResult("tk-check-res", what + ": SPENT - This token has been redeemed and cannot be used again.", "err");
     } else {
-      showResult("tk-check-res", "UNSPENT - This token has not been seen by the mint (or is not tracked).", "ok");
+      showResult("tk-check-res", what + ": UNSPENT - This token has not been seen by the mint (or is not tracked).", "ok");
     }
   } catch(e) {
     showResult("tk-check-res", "Error: " + e.message, "err");
   }
 }
-window.checkSpent = checkSpent;
 
 // ── Lightning Tab ───────────────────────────────────────────
 async function loadLightning() {
@@ -803,7 +942,7 @@ async function loadLightning() {
         <table class="tbl">
           <tbody>
             <tr><td class="muted" style="width:120px">Type</td><td><strong>${esc(d.type)}</strong></td></tr>
-            <tr><td class="muted">URL</td><td class="mono">${esc(d.url || 'N/A')}</td></tr>
+            <tr><td class="muted">URL</td><td class="mono" style="word-break:break-all">${esc(d.url || 'N/A')}</td></tr>
             <tr><td class="muted">API Key</td><td>${d.api_key_set ? badge('Configured', 'active') : badge('Not set', 'inactive')}</td></tr>
           </tbody>
         </table>
@@ -817,10 +956,9 @@ async function loadLightning() {
       toggleLnFields();
     }
   } catch(e) {
-    document.getElementById("ln-body").innerHTML = `<div class="res err" style="display:block">${e.message}</div>`;
+    document.getElementById("ln-body").innerHTML = errBox(e);
   }
 }
-window.loadLightning = loadLightning;
 
 function toggleLnFields() {
   const type = document.getElementById("ln-type").value;
@@ -835,7 +973,6 @@ function toggleLnFields() {
     macaroonField.style.display = type === 'lnd' ? 'flex' : 'none';
   }
 }
-window.toggleLnFields = toggleLnFields;
 
 async function configureLn() {
   const type = document.getElementById("ln-type").value;
@@ -855,46 +992,44 @@ async function configureLn() {
     body = {type: 'lnd', url, macaroon};
   }
   try {
-    const d = await adminApi("/lightning/configure", {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(body)
-    });
+    const d = await post("/lightning/configure", body);
     showResult("ln-config-res", "Configured: " + d.type + (d.url ? " at " + d.url : ""), "ok");
     await loadLightning();
-    await loadStats();
+    loadOverview(true);
   } catch(e) {
     showResult("ln-config-res", "Error: " + e.message, "err");
   }
 }
-window.configureLn = configureLn;
 
 async function clearLn() {
   if (!confirm('Remove Lightning backend? bolt11 minting/melting will be disabled.')) return;
   try {
-    await adminApi("/lightning/configure", {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({type: 'none'})
-    });
+    await post("/lightning/configure", {type: 'none'});
     showResult("ln-config-res", "Lightning backend removed", "ok");
     await loadLightning();
-    await loadStats();
+    loadOverview(true);
   } catch(e) {
     showResult("ln-config-res", "Error: " + e.message, "err");
   }
 }
-window.clearLn = clearLn;
 
+// A real round-trip to the backend: report ok/error exactly as the mint saw it.
 async function testLn() {
+  showResult("ln-config-res", "Testing...", "");
   try {
-    const d = await adminApi("/lightning/test", {method: 'POST'});
-    showResult("ln-config-res", d.status + ": " + d.message, "ok");
+    const d = await post("/lightning/test");
+    const ok = d.status === 'ok';
+    const lines = [
+      String(d.status || '?').toUpperCase() + ": " + (d.type || '?') + (d.url ? " at " + d.url : ""),
+      d.http_status != null ? "HTTP status: " + d.http_status : "",
+      d.balance_msat != null ? "Balance: " + Math.floor(Number(d.balance_msat) / 1000).toLocaleString() + " sats" : "",
+      d.detail != null ? "Detail: " + (typeof d.detail === 'string' ? d.detail : JSON.stringify(d.detail)) : "",
+    ];
+    showResult("ln-config-res", lines.filter(Boolean).join("\n"), ok ? "ok" : "err");
   } catch(e) {
-    showResult("ln-config-res", "Error: " + e.message, "err");
+    showResult("ln-config-res", "Test failed: " + e.message, "err");
   }
 }
-window.testLn = testLn;
 
 // ── Info Tab ────────────────────────────────────────────────
 async function loadInfo() {
@@ -907,16 +1042,14 @@ async function loadInfo() {
           <tr><td class="muted" style="width:140px">Name</td><td><strong>${esc(d.name || 'Unnamed')}</strong></td></tr>
           <tr><td class="muted">Version</td><td class="mono">${esc(d.version || '?')}</td></tr>
           <tr><td class="muted">Description</td><td>${esc(d.description || 'N/A')}</td></tr>
-          <tr><td class="muted">Description (long)</td><td>${esc(d.description_long || 'N/A')}</td></tr>
-          <tr><td class="muted">Contact</td><td>${esc((d.contact || []).map(c => c.join(': ')).join(', ') || 'N/A')}</td></tr>
-          <tr><td class="muted">MOTD</td><td>${esc(d.motd || 'N/A')}</td></tr>
         </tbody>
       </table>
       <div style="font-weight:600;font-size:.85rem;margin-bottom:8px">Supported NUTs</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         ${Object.keys(nuts).sort((a,b) => +a - +b).map(n => {
-          const nut = nuts[n];
-          const methods = nut.methods ? nut.methods.map(m => m.method + '/' + m.unit).join(', ') : '';
+          const nut = nuts[n] || {};
+          const methods = Array.isArray(nut.methods) ? nut.methods.map(m => m.method + '/' + m.unit +
+            (m.min_amount != null || m.max_amount != null ? ' ' + (m.min_amount ?? 0) + '-' + (m.max_amount ?? '∞') : '')).join(', ') : '';
           const supported = nut.supported !== undefined ? (nut.supported ? 'Yes' : 'No') : '';
           const detail = methods || supported || (nut.disabled ? 'disabled' : 'supported');
           return `<div class="ki" style="min-width:80px;cursor:default" title="NUT-${esc(n)}: ${esc(detail)}">
@@ -933,10 +1066,9 @@ async function loadInfo() {
     document.getElementById("nf-name").value = d.name || '';
     document.getElementById("nf-desc").value = d.description || '';
   } catch(e) {
-    document.getElementById("nf-body").innerHTML = `<div class="res err" style="display:block">${e.message}</div>`;
+    document.getElementById("nf-body").innerHTML = errBox(e);
   }
 }
-window.loadInfo = loadInfo;
 
 async function updateInfo() {
   const name = document.getElementById("nf-name").value.trim();
@@ -946,21 +1078,13 @@ async function updateInfo() {
     const body = {};
     if (name) body.name = name;
     if (description) body.description = description;
-    const d = await adminApi("/info/update", {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(body)
-    });
+    const d = await post("/info/update", body);
     showResult("nf-res", "Updated: " + d.name + " - " + d.description, "ok");
     await loadInfo();
   } catch(e) {
     showResult("nf-res", "Error: " + e.message, "err");
   }
 }
-window.updateInfo = updateInfo;
-
-// ── Utilities ───────────────────────────────────────────────
-window.copyText = copyText;
 
 // ── Init ────────────────────────────────────────────────────
 document.getElementById("autorefresh").addEventListener("change", e => {
@@ -968,7 +1092,7 @@ document.getElementById("autorefresh").addEventListener("change", e => {
 });
 
 async function init() {
-  await Promise.all([loadStats(), loadOverview(), loadSettings()]);
+  await Promise.all([loadOverview(), loadSettings()]);
   startAuto(loadOverview);
 }
 
@@ -994,7 +1118,8 @@ const ACTIONS = {
   loadOverview, updateSettings, generateKeyset, loadKeysets, showKeysetList,
   loadQuotes, loadSpent, checkSpent, loadLightning, toggleLnFields, configureLn,
   testLn, loadInfo, updateInfo, clearLn, copyText, viewKeyset, activateKeyset,
-  setKeysetFee, deleteQuote,
+  deactivateKeyset, setKeysetFee, deleteQuote, revokeQuote, abortMelt, quotePage,
+  forceAbortMelt: (id) => abortMelt(id, true),
 };
 document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-act]');

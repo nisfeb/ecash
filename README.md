@@ -4,87 +4,93 @@ A Cashu ecash mint implemented in Hoon, running as a Gall agent on Urbit.
 
 ## Overview
 
-A fully functional [Cashu](https://cashu.space) mint that implements blind Diffie-Hellman key exchange (BDHKE) with real secp256k1 cryptography, entirely in Hoon. It supports minting, melting, and swapping ecash tokens with Lightning Network integration and an admin dashboard.
+A [Cashu](https://cashu.space) mint with blind Diffie-Hellman key exchange (BDHKE) over
+secp256k1, written in Hoon. It mints, melts and swaps ecash tokens, pays and receives over
+Lightning (LNbits or LND), and has an admin dashboard.
 
-The mint is self-sovereign: it runs inside your Urbit identity, is accessible via your ship's HTTP interface, and stores all state in Urbit's event log (crash-recoverable). The cryptography is implemented in **pure Hoon** with no external dependencies or native jets for BDHKE operations.
+The mint runs inside your Urbit identity, is served by your ship's HTTP server, and keeps all
+state in the ship's event log. The elliptic-curve math for BDHKE, DLEQ and hash-to-curve is
+**pure Hoon** (`lib/curve.hoon`, `lib/bdhke.hoon`), with no jets. P2PK signature checks use
+zuse's BIP-340 verify, which the runtime jets.
 
-Beyond standard Cashu, the mint includes two extensions for non-value-bearing use cases:
+Beyond standard Cashu there are two extensions for tokens that carry no value, in a separate
+agent, `%ecash-services`:
 
-- **Credential token extension** — raw `/cred/v1` endpoints for issuing zero-value blind-signed tokens (power-user / library consumers).
-- **Services layer** — a higher-level access-control layer built on top of credentials. Each service is a named scope with its own keyset, optional expiration, issuance cap, and per-service API-key allowlist. The dashboard surfaces services as a distinct tab and visually delineates "value-bearing" (sats) vs "access" (services) everywhere.
+- **Credential tokens**: raw `/cred/v1` endpoints for zero-value blind-signed tokens.
+- **Services**: named access scopes, each with its own keyset, optional expiry, issuance cap and
+  API-key allowlist.
 
 ## Supported NUTs
 
 | NUT | Name | Status |
 |-----|------|--------|
-| 00 | Cryptography | BDHKE with secp256k1, DLEQ proofs |
+| 00 | Cryptography | BDHKE on secp256k1, DLEQ proofs |
 | 01 | Mint public keys | `GET /v1/keys` |
-| 02 | Keysets | `GET /v1/keysets`, `GET /v1/keys/{id}`, per-keyset `input_fee_ppk` |
+| 02 | Keysets and fees | `GET /v1/keysets`, `GET /v1/keys/{id}`, per-keyset `input_fee_ppk` |
 | 03 | Swap | `POST /v1/swap` |
-| 04 | Mint (bolt11 + self) | `POST /v1/mint/quote/{method}`, `POST /v1/mint/{method}` |
-| 05 | Melt (bolt11 + self) | `POST /v1/melt/quote/{method}`, `POST /v1/melt/{method}` |
+| 04 | Mint (bolt11, self) | `POST /v1/mint/quote/{method}`, `POST /v1/mint/{method}` |
+| 05 | Melt (bolt11, self) | `POST /v1/melt/quote/{method}`, `POST /v1/melt/{method}` |
 | 06 | Mint info | `GET /v1/info` |
-| 07 | Token state check | `POST /v1/checkstate` |
-| 10 | Well-known secrets | Structured secret format `["kind", {nonce, data, tags}]` |
-| 11 | P2PK | Pay-to-public-key with Schnorr signatures, multisig, locktime, refund |
-| 12 | DLEQ proofs | Included in all mint/swap responses |
+| 07 | Token state check | `POST /v1/checkstate` (`UNSPENT`, `PENDING`, `SPENT`) |
+| 08 | Lightning fee return | Melt change: unused fee reserve plus any overpayment |
+| 09 | Restore | `POST /v1/restore` (seed-phrase recovery for NUT-13 wallets) |
+| 10 | Spending conditions | Well-known secrets `["kind", {nonce, data, tags}]`; only `P2PK` is accepted |
+| 11 | P2PK | Schnorr signatures, multisig, locktime, refund keys (`SIG_INPUTS` only) |
+| 12 | DLEQ proofs | On every signature the mint returns |
 
-## Project Structure
+## Project structure
 
-The mint and the access-control extensions are **two separate Gall agents**:
-`%ecash` (the value mint) and `%ecash-services` (zero-value credentials + the services
-layer). They share the secp256k1/BDHKE crypto, whose single source of truth is `desk/lib`.
+The mint and the access layer are **two Gall agents on two desks**. They share the crypto and
+HTTP libraries, whose single source is `desk/lib`.
 
 ```
-desk/                    → installs as %ecash (the value mint)
-  app/ecash.hoon         Main Gall agent (Cashu /v1/* + /apps/ecash/admin)
-  app/dashboard.txt      Admin dashboard HTML/JS, imported via /* at build time
-  sur/ecash.hoon         Shared types (keyset, quote, ln-backend, ...)
-  lib/bdhke.hoon         BDHKE protocol, hash-to-curve, DLEQ proofs   (canonical)
-  lib/curve.hoon         secp256k1 point arithmetic (pure Hoon)       (canonical)
-  mar/txt.hoon           Override for %txt mark (handles raw HTML asset import)
-  tests/test.hoon        Hoon unit tests
-desk-services/           → installs as %ecash-services (cred + services, non-value)
-  app/ecash-services.hoon  Serves /cred/v1/*, /services/v1/*, /apps/ecash-services/admin
-  sur/ecash-services.hoon  cred-keyset / service types
-  lib/{curve,bdhke}.hoon   generated from desk/lib (gitignored; `make sync-libs`)
-test-e2e.mjs             End-to-end mint/swap/checkstate/melt flow (9 assertions)
-test-vectors.mjs         NUT-00 hash-to-curve official test vectors (3 vectors)
-test-p2pk.mjs            P2PK/NUT-11 coverage (8 tests)
-test-cred.mjs            Credential extension (31 tests)
-test-services.mjs        Services layer: creation, allowlist, expiry, replay (34 tests)
-test-lightning.mjs       bolt11 Lightning integration (requires mock-lnbits)
-mock-lnbits.mjs          Mock LNbits server for Lightning testing
+desk/                      installs as %ecash (the value mint)
+  app/ecash.hoon           agent: state and I/O (Cashu /v1/*, /apps/ecash/admin)
+  app/dashboard.txt        admin dashboard HTML/JS
+  sur/ecash.hoon           shared types (keyset, quotes, ln-backend, ...)
+  lib/ecash-rules.hoon     the mint's rules as pure arms (checks, signing, P2PK, Lightning answers)
+  lib/ecash-http.hoon      HTTP/JSON plumbing and request caps          (shared)
+  lib/bdhke.hoon           BDHKE, hash-to-curve, DLEQ, BIP-340 verify    (shared)
+  lib/curve.hoon           secp256k1 point arithmetic                    (shared)
+desk-services/             installs as %ecash-services (credentials and services, no value)
+  app/ecash-services.hoon  agent: /cred/v1/*, /services/v1/*, /apps/ecash-services/admin
+  lib/ecash-services-rules.hoon
+  sur/ecash-services.hoon
+  lib/{curve,bdhke,ecash-http}.hoon   copied from desk/lib by build.sh or `make sync-libs`
+                                      (gitignored)
+tests/lib/*.hoon           Hoon unit suites (see docs/hoon-testing.md)
+test-*.mjs, run-tests.mjs  JS suites against a running ship
+mock-lnbits.mjs            mock LNbits for the Lightning suites and the demo
 ```
 
 ## Installation
 
-Build both desks (requires [peru](https://github.com/buildinspace/peru)), then
-install on your ship:
+Build both desks (requires [peru](https://github.com/buildinspace/peru)), then install on your
+ship. The desks declare `[%zuse 408]`.
 
 ```bash
 git clone https://github.com/nisfeb/ecash && cd ecash
 ./build.sh          # builds dist/ (%ecash) and dist-services/ (%ecash-services)
 ```
 
-In the dojo, create and mount the desk; then deploy the built desk into the mount
-and commit:
+In the dojo, create and mount the desk; then deploy the built desk into the mount and commit:
 
 ```
 |new-desk %ecash
 |mount %ecash
 ```
 ```bash
-./build.sh -p /path/to/your/pier/ecash    # copies the built desk into the mount
+./build.sh -p /path/to/your/pier/ecash    # wipes the mounted desk and copies dist/ into it
 ```
 ```
 |commit %ecash
 |install our %ecash
 ```
 
-The mint generates a keyset with 10 denominations (1, 2, 4, 8, 16, 32, 64, 128, 256, 512 sats) on first install — with Lightning off (`%none`) and the free `self` method disabled, so it's safe until you configure it.
+On first install the mint generates a keyset with 21 denominations (1, 2, 4, … 2^20 sats), sets
+Lightning to `none` and leaves the free `self` method off, so it is inert until you configure it.
 
-To also run the zero-value credentials/access layer, install **`%ecash-services`** the same way:
+To also run the credentials/services layer, install **`%ecash-services`** the same way:
 
 ```
 |new-desk %ecash-services
@@ -98,390 +104,376 @@ To also run the zero-value credentials/access layer, install **`%ecash-services`
 |install our %ecash-services
 ```
 
-**Running a public mint?** See [`docs/INSTALL.md`](docs/INSTALL.md) for the full
-walkthrough — installing both desks, exposing the ship over HTTPS with a
-rate-limiting reverse proxy, configuring the Lightning backend, and the
-pre-production safety checklist.
+**Running a public mint?** Read [`docs/INSTALL.md`](docs/INSTALL.md) (HTTPS, reverse proxy, rate
+limiting, Lightning, pre-production checks) and
+[`docs/operator-runbook.md`](docs/operator-runbook.md).
 
 ---
 
 ## Demo
 
-`demo.mjs` is a narrated, presentation-paced walkthrough of the whole ecash
-lifecycle against a running mint — useful for showing the system to others. In
-five acts (Alice & Bob) it: meets the mint, deposits sats over Lightning to
-receive blind-signed ecash, pays a peer via a swap, shows that double-spending is
-rejected, and cashes out back to Lightning with NUT-08 change. The crypto is real
-BDHKE; no real money moves (a mock LNbits backend simulates the Lightning side).
+`demo.mjs` is a narrated walkthrough of the ecash lifecycle against a running mint: deposit over
+Lightning, pay a peer with a swap, a refused double-spend, and a melt back to Lightning with
+NUT-08 change. The crypto is real; a mock LNbits stands in for Lightning, so run it on a test
+ship, never on a mint holding real value.
 
 ```
-npm run mock:lnbits        # start the mock Lightning backend on :3338
-# configure the mint to use it (admin), then:
-npm run demo               # narrated, paced for a live audience
-node demo.mjs --fast       # same flow, no pauses
-node demo.mjs --amount 250 # vary Alice's deposit (12–1000 sats)
+npm run mock:lnbits                          # mock Lightning backend on :3338
+# point the mint's Lightning backend at it (the demo prints the command), then:
+SHIP_URL=http://localhost:8080 npm run demo  # paced for a live audience
+SHIP_URL=http://localhost:8080 node demo.mjs --fast --amount 250   # no pauses; 12–1000 sats
 ```
 
-If a prerequisite is missing (mint unreachable, no Lightning backend, mock not
-running) the demo prints the exact command to fix it instead of failing. Override
-endpoints with `SHIP_URL`, `MOCK_URL`, and `API_KEY` env vars.
+`SHIP_URL` is required. `MOCK_URL` and `API_KEY` override the mock's address and key.
 
 ---
 
-## Cashu Protocol Endpoints
+## Cashu protocol endpoints
 
-All standard Cashu endpoints are unauthenticated, served at `/v1/*`:
+All public, no authentication:
 
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/v1/info` | Mint info (NUT-06) |
-| GET | `/v1/keys` | Active keyset public keys (NUT-01) |
-| GET | `/v1/keys/{keyset_id}` | Keys for specific keyset (NUT-02) |
-| GET | `/v1/keysets` | Keyset metadata (NUT-02) |
+| GET | `/v1/keys` | Active keysets with public keys (NUT-01) |
+| GET | `/v1/keys/{keyset_id}` | One keyset, active or not (NUT-02) |
+| GET | `/v1/keysets` | All keysets, metadata only (NUT-02) |
 | POST | `/v1/swap` | Swap tokens (NUT-03) |
 | POST | `/v1/mint/quote/{method}` | Create mint quote (NUT-04) |
 | GET | `/v1/mint/quote/{method}/{quote_id}` | Check mint quote (NUT-04) |
-| POST | `/v1/mint/{method}` | Mint tokens from paid quote (NUT-04) |
+| POST | `/v1/mint/{method}` | Mint tokens from a paid quote (NUT-04) |
 | POST | `/v1/melt/quote/{method}` | Create melt quote (NUT-05) |
 | GET | `/v1/melt/quote/{method}/{quote_id}` | Check melt quote (NUT-05) |
-| POST | `/v1/melt/{method}` | Melt tokens to pay invoice (NUT-05) |
-| POST | `/v1/checkstate` | Check token spent state (NUT-07) |
+| POST | `/v1/melt/{method}` | Melt tokens to pay an invoice (NUT-05) |
+| POST | `/v1/checkstate` | Token state (NUT-07) |
+| POST | `/v1/restore` | Signatures for re-derived blinded messages (NUT-09) |
 
-### Mint Methods
+Every response carries `Access-Control-Allow-Origin: *` and `cache-control: no-store`, and the
+mint answers CORS preflight (`OPTIONS`) on the public routes, so browser wallets work without
+proxy CORS config. Errors are `{"detail": "<code>"}` with a 4xx/5xx status.
 
-- **`self`** — Instant minting/melting with no Lightning required. Useful for testing and on-ship token operations. **Disabled by default** on a value-bearing mint; enable it via the admin Settings (`self_method_enabled`) for testing.
-- **`bolt11`** — Lightning Network integration. Requires a configured Lightning backend.
+### Limits
 
-### Standard Flows
+| Limit | Value | Error |
+|-------|-------|-------|
+| Inputs, outputs, `Ys` or restore outputs per request | 100 | `batch-too-large` |
+| Request body | 1 MiB | `body-too-large` |
+| Proof secret | 2048 bytes | `secret-too-long` |
+| Mint amount | `max_amount` in `/v1/info` (nut 4) | `amount-too-large` |
+| P2PK keys in a lock, signatures in a witness | 10 | the spend fails |
 
-**Minting tokens (deposit):**
+The secret cap leaves room for the largest P2PK lock the key limits allow (about 1.6 KB): the
+mint can't see a secret before it is spent, so a smaller cap would freeze tokens it issued.
+`max_amount` is the most the active keyset can mint in 100 outputs: `(100 − m) × 2^m` when its
+largest denomination is 2^m. That is 83,886,080 sats for a keyset made now (2^0..2^20) and 46,592
+sats for an older 1..512 keyset. Melts name no maximum: they are bounded by the inputs a wallet
+can send. `/v1/info` lists `self` only while it is enabled and `bolt11` only while a Lightning
+backend is configured.
+
+### Swap and mint are all-or-nothing
+
+Every output is checked before anything is spent. An output that can't be signed refuses the
+whole request with a 400: `invalid-msg`, `missing-B_`, `invalid-B_-point`, `duplicate-output`,
+`output-already-signed` (that B_ was signed before; NUT-13 wallets use this to recover their
+counter), `unknown-keyset`, `inactive-keyset`, `unknown-denomination`. Swaps and melts whose
+claimed amounts don't balance are refused (`amounts-do-not-balance`, `insufficient-inputs`,
+`fee-exceeds-inputs`) before any elliptic-curve work.
+
+### Mint methods
+
+- **`bolt11`**: Lightning. Needs a configured backend.
+- **`self`**: mints and melts with no payment at all. **Off by default.** Enable it
+  (`self_method_enabled`) only on a test mint: on a mint with a real Lightning backend, free
+  `self` tokens can be melted over bolt11 for real sats. A melt quote settles only by the method
+  that created it (`method-mismatch`).
+
+### Flows
+
+**Mint (deposit):**
 ```
-POST /v1/mint/quote/bolt11   {"amount": 100}
-→ {"quote": "abc123", "request": "lnbc100n1...", "state": "UNPAID", ...}
+POST /v1/mint/quote/bolt11   {"amount": 100, "unit": "sat"}
+→ {"quote": "abc…", "request": "lnbc1u1…", "unit": "sat", "amount": 100, "state": "UNPAID", "expiry": 1760000000}
 
-# User pays the Lightning invoice, then:
-GET /v1/mint/quote/bolt11/abc123
-→ {"state": "PAID", ...}
+# pay the invoice, then poll:
+GET /v1/mint/quote/bolt11/abc…
+→ {"state": "PAID", …}
 
-POST /v1/mint/bolt11   {"quote": "abc123", "outputs": [{B_: "02...", amount: 1}, ...]}
-→ {"signatures": [{C_: "03...", amount: 1, dleq: {...}}, ...]}
+POST /v1/mint/bolt11   {"quote": "abc…", "outputs": [{"amount": 64, "id": "01…", "B_": "02…"}, …]}
+→ {"signatures": [{"C_": "03…", "amount": 64, "id": "01…", "dleq": {"e": "…", "s": "…"}}, …]}
 ```
 
-**Melting tokens (withdraw):**
-```
-POST /v1/melt/quote/bolt11   {"request": "lnbc50n1..."}
-→ {"quote": "def456", "amount": 50, "fee_reserve": 10, "state": "UNPAID", ...}
+A quote poll answers at once with the stored state and asks Lightning in the background; a later
+poll sees the change. A `PAID` quote can be minted even after it expires.
 
-POST /v1/melt/bolt11   {"quote": "def456", "inputs": [{C: "03...", secret: "...", amount: 1, id: "01..."}, ...]}
-→ {"state": "PAID", "payment_preimage": "abc..."}
+**Melt (withdraw):**
+```
+POST /v1/melt/quote/bolt11   {"request": "lnbc500n1…", "unit": "sat"}
+→ {"quote": "def…", "amount": 50, "fee_reserve": 10, "state": "UNPAID", …}
+
+POST /v1/melt/bolt11   {"quote": "def…", "inputs": [proofs…], "outputs": [blank outputs…]}
+→ {"state": "PAID", "payment_preimage": "…", "change": [signatures…], …}
 ```
 
-**Swapping tokens:**
+- Inputs must cover `amount + fee_reserve` after input fees.
+- The `request` must be letters and digits only (`invalid-request`). With LNbits, an invoice
+  for a fraction of a sat is quoted at the next whole sat.
+- Change (NUT-08) is the unused fee reserve **plus** anything the inputs paid beyond
+  `amount + fee_reserve` and the input fee. It is split into powers of two, largest first, and signed onto the
+  blank outputs in order. **Send enough blank outputs**: change that doesn't fit is kept by the
+  mint.
+- If the payment's outcome is not yet known the answer is `"state": "PENDING"`. Poll the quote;
+  don't re-submit (`quote-pending`). While a melt is `PENDING`, `/v1/checkstate` reports its
+  proofs as `PENDING`: they come back if the payment fails.
+
+**Swap:**
 ```
 POST /v1/swap
-{
-  "inputs": [{C: "03...", secret: "old-secret", amount: 4, id: "01..."}],
-  "outputs": [{B_: "02...", amount: 2}, {B_: "02...", amount: 2}]
-}
-→ {"signatures": [{C_: "03...", amount: 2, dleq: {...}}, ...]}
+{"inputs":  [{"amount": 4, "id": "01…", "secret": "…", "C": "03…"}],
+ "outputs": [{"amount": 2, "id": "01…", "B_": "02…"}, {"amount": 2, "id": "01…", "B_": "02…"}]}
+→ {"signatures": [{"C_": "03…", "amount": 2, "id": "01…", "dleq": {…}}, …]}
 ```
+`sum(inputs) − fee == sum(outputs)`, where fee is `ceil(sum of each input's keyset input_fee_ppk / 1000)`.
 
-**P2PK tokens (NUT-11):**
+**P2PK (NUT-11):**
 ```
-# Secret locks token to recipient's public key:
-secret = '["P2PK", {"nonce": "abc", "data": "02recipient_pubkey...", "tags": []}]'
-
-# Recipient signs SHA256(secret) with their private key to spend:
-witness = '{"signatures": ["schnorr_sig_hex"]}'
-
-POST /v1/swap
-{"inputs": [{C: "...", secret: "...", amount: 1, id: "...", witness: "..."}], "outputs": [...]}
+secret  = '["P2PK", {"nonce": "…", "data": "02<recipient pubkey>", "tags": []}]'
+witness = '{"signatures": ["<BIP-340 signature over SHA256(secret)>"]}'   # a JSON string
 ```
-
-Supports multisig (`n_sigs` + `pubkeys` tags), locktime, and refund keys.
+Multisig (`n_sigs`, `pubkeys`), `locktime` and `refund` / `n_sigs_refund` tags work. Only
+`SIG_INPUTS` is supported (`unsupported-sigflag`), and other NUT-10 kinds such as HTLC are refused
+(`unsupported-spending-condition`). **Keep locks to 10 keys:** if the `data` key plus `pubkeys`
+number more than 10, those keys can never spend the token (likewise more than 10 `refund`
+keys), and a witness with more than 10 signatures is refused.
 
 ---
 
-## Lightning Backend
+## Lightning backend
 
-The mint supports two Lightning backends:
+- **LNbits**: `{"type": "lnbits", "url": "…", "api_key": "…"}`. The key must be able to pay
+  invoices. **Use LNbits for real funds.**
+- **LND**: `{"type": "lnd", "url": "…", "macaroon": "…"}`. The LND path has **never been tested
+  against a real LND node**, and its payment-status lookup (`GET /v1/payment/{hash}`) is
+  unverified: a melt left `PENDING` on LND may resolve only through the admin abort (see the
+  runbook).
 
-- **LNbits** — `{type: "lnbits", url: "...", api_key: "..."}`
-- **LND** — `{type: "lnd", url: "...", macaroon: "..."}`
-
-Configure via the admin dashboard, admin API, or dojo:
+Configure it from the dashboard, the admin API, or the dojo:
 ```
-:ecash [%lnbits 'http://your-lnbits:5000' 'your-api-key']
+:ecash [%lnbits 'https://your-lnbits' 'your-api-key']
 ```
 
 ### Settings
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `fee_reserve_pct` | 100 (1%) | Fee reserve percentage in basis points |
-| `fee_reserve_min` | 10 | Minimum fee reserve in sats |
-| `quote_ttl_secs` | 3600 | Quote time-to-live in seconds |
-| `self_method_enabled` | false | Enable the no-payment `self` mint/melt method (testing only) |
+| `fee_reserve_pct` | 100 | Melt fee reserve in **basis points** of the amount (100 = 1%) |
+| `fee_reserve_min` | 10 | Minimum fee reserve, sats |
+| `quote_ttl_secs` | 3600 | Quote and invoice lifetime; the server floors it at 60 |
+| `self_method_enabled` | false | The no-payment `self` method (test mints only) |
+
+`POST /settings` accepts any subset. Numbers must be bare non-negative integers and
+`self_method_enabled` a boolean, else `400 invalid-<field>` and nothing changes.
 
 ---
 
-## Admin Dashboard
+## Admin dashboard
 
-`GET /apps/ecash/admin` serves a single-page admin UI (authenticated via the ship cookie) with six tabs:
+`GET /apps/ecash/admin` (your ship's login) has six tabs: Overview (liability, quote counts,
+settings), Keysets (generate, activate, deactivate, set fee), Quotes (delete, revoke, abort and
+force-abort stuck melts), Tokens (spent lookups), Lightning (configure, test) and Info (NUT-06
+name and description). Its CSP runs only its own nonce'd script and allows no form posts.
 
-- **Overview** — Mint/melt quote summaries, active keyset, liability counters, settings form
-- **Keysets** — List, generate, activate/deactivate, set fees, view denomination keys
-- **Quotes** — Filterable list (all/mint/melt/unpaid/paid/issued), delete
-- **Tokens** — Spent counts, check secret/Y-point status
-- **Lightning** — Backend status, configure/remove, connection info
-- **Info** — NUT-06 mint name/description, edit form
+Credentials and services have their own dashboard at `/apps/ecash-services/admin`.
 
-Stats bar shows: tokens issued/spent, issued/redeemed/outstanding sats, LN backend, pending requests.
+## Admin API (`%ecash`)
 
-Service and credential management lives in the separate `%ecash-services` agent, which serves its own dashboard at `/apps/ecash-services/admin` (see the Credential and Services sections below).
-
-## Admin API
-
-All admin endpoints require the ship's auth cookie. Unauthenticated requests receive `401 unauthorized`. Base path: `/apps/ecash/admin/api`
-
-### Read endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/overview` | Mint stats (keysets, quotes, issued/redeemed sats, LN status) |
-| GET | `/keysets` | All keysets with full detail |
-| GET | `/keysets/{id}` | Single keyset detail |
-| GET | `/quotes` | All mint and melt quotes |
-| GET | `/spent` | Spent token counts |
-| GET | `/lightning` | Lightning backend status |
-| GET | `/info` | Mint name and description |
-| GET | `/settings` | Fee reserve and quote TTL settings |
-
-### Write endpoints
+Base path `/apps/ecash/admin/api`. Every call needs your ship's session cookie
+(`401 unauthorized` without it). A state-changing request that sends `Origin` or `Referer` must
+name the same host as `Host` (`403 forbidden-cross-origin`); requests sending neither (curl,
+scripts) pass. Behind a proxy, forward the `Host` header (`X-Forwarded-Host` is not trusted).
 
 | Method | Path | Body | Description |
 |--------|------|------|-------------|
-| POST | `/keysets/generate` | — | Generate new keyset (inactive) |
-| POST | `/keysets/activate` | `{id}` | Activate keyset (deactivates previous) |
-| POST | `/keysets/deactivate` | `{id}` | Deactivate keyset |
-| POST | `/keysets/set-fee` | `{id, fee}` | Set `input_fee_ppk` (recomputes keyset ID) |
-| POST | `/quotes/delete` | `{type, id}` | Delete a quote |
-| POST | `/spent/check` | `{secret}` or `{Y}` | Check if secret/Y-point is spent |
-| POST | `/lightning/configure` | `{type, url, api_key\|macaroon}` | Configure LN backend |
-| POST | `/lightning/test` | — | Test LN connection |
-| POST | `/info/update` | `{name, description}` | Update mint name/description |
-| POST | `/settings` | `{fee_reserve_pct, fee_reserve_min, quote_ttl_secs}` | Update settings |
-| GET | `/services` | — | List all services with full allowlist keys |
-| GET | `/services/{name}` | — | Service detail including allowlist |
-| POST | `/services/create` | `{name, title, description, expires?, max_issuance?}` | Create service (auto-generates backing cred keyset) |
-| POST | `/services/update` | `{name, title?, description?, expires?, max_issuance?}` | Patch metadata |
-| POST | `/services/activate` | `{name}` | Reopen a deactivated service |
-| POST | `/services/deactivate` | `{name}` | Close issue/verify/redeem for a service |
-| POST | `/services/delete` | `{name}` | Delete (only when inactive and never issued) |
-| POST | `/services/allowlist/add` | `{name, key}` | Add an API access key to a service |
-| POST | `/services/allowlist/remove` | `{name, key}` | Remove an API access key |
+| GET | `/overview` | — | Keyset, counters, `total_issued_sats` / `total_redeemed_sats`, quote tallies, backend |
+| GET | `/keysets` | — | All keysets: `id`, `active`, `input_fee_ppk`, `key_count`, `denominations`, `created` |
+| GET | `/keysets/{id}` | — | One keyset with its public keys |
+| GET | `/quotes` | — | `mint_quotes` and `melt_quotes`, each with `method`, `state`, `expiry` |
+| GET | `/spent` | — | Spent secret and Y counts |
+| GET | `/lightning` | — | `{type, configured, url, api_key_set}`; the credential is never returned |
+| GET | `/info` | — | Same as `/v1/info` |
+| GET | `/settings` | — | `{fee_reserve_pct, fee_reserve_min, quote_ttl_secs, self_method_enabled}` |
+| POST | `/keysets/generate` | — | New **inactive** keyset (2^0..2^20) → `{id, active, key_count}` |
+| POST | `/keysets/activate` | `{id}` | Make it the active keyset; the previous one goes inactive |
+| POST | `/keysets/deactivate` | `{id}` | Refuses the active keyset (`cannot-deactivate-active`) |
+| POST | `/keysets/set-fee` | `{id, input_fee_ppk}` | **Forks** to fresh keys under a new id; the old id stays as an inactive alias. Max 100000 → `{old_id, new_id, input_fee_ppk}` |
+| POST | `/quotes/delete` | `{quote_id, type}` | `type` is `mint` or `melt`. Refused for PAID/ISSUED mint quotes and PAID/PENDING melts |
+| POST | `/quotes/revoke` | `{quote_id}` | **Destructive.** Deletes any mint quote, even PAID or ISSUED; an ISSUED quote's amount comes off total issued |
+| POST | `/melt/abort` | `{quote_id, force?, secrets?, ys?}` | Resolve a stuck PENDING bolt11 melt (runbook §4) |
+| POST | `/spent/check` | `{secret}` or `{Y}` | Is it spent? |
+| POST | `/lightning/configure` | `{type:"none"}`, `{type:"lnbits", url, api_key}` or `{type:"lnd", url, macaroon}` | Set the backend |
+| POST | `/lightning/test` | — | Calls the backend (LNbits `GET /api/v1/wallet`, LND `GET /v1/getinfo`) → `{status, type, url, http_status, detail?, balance_msat?}` |
+| POST | `/info/update` | `{name?, description?}` | NUT-06 name and description |
+| POST | `/settings` | any of the settings | Validated (see above); answers the full settings |
+
+A revoked PAID quote is a customer's deposit that was never minted: revoking it means they can
+never mint it. Only do that after refunding them some other way.
 
 ---
 
-## Credential Token Extension
+## Credential tokens (`%ecash-services`)
 
-> **Phase 3:** the credential and services layers run as a **separate `%ecash-services` agent**
-> (desk `desk-services/`). Public endpoints are `/cred/v1/*` and `/services/v1/*`; the admin API
-> base is `/apps/ecash-services/admin/api/`. Install with `|install our %ecash-services`. The
-> sections below describe its behavior.
+Zero-value blind-signed tokens that act as access credentials. This is a non-standard extension;
+it does not touch `/v1/*`.
 
-The credential extension enables issuing **zero-value tokens** that serve as access credentials rather than value-bearing ecash. This is a non-standard extension that does not affect Cashu protocol compliance.
+- Credential keysets are separate from value keysets. Their ids start `c0` (value keysets `01`).
+- Every output must carry `"amount": 0`, exactly the number 0.
+- Credentials have their own spent set, per keyset.
+- Same BDHKE and DLEQ as value tokens.
 
-### Use Case
+### Endpoints
 
-A "space" or application gates access behind payment:
-
-1. **User pays** — sends real ecash tokens to the space application
-2. **Space redeems payment** — swaps/verifies the value tokens via the standard Cashu API
-3. **Space issues credentials** — requests N credential tokens (e.g., 30 daily login passes) from the mint via `/cred/v1/issue`
-4. **User presents credentials** — one token per day; the space app verifies via `/cred/v1/verify` and consumes via `/cred/v1/redeem`
-
-### Design Principles
-
-- Credential keysets are **completely separate** from value keysets
-- Credential keyset IDs use prefix `c0` (value keysets use `01`) — no collision possible
-- All credential tokens have `amount: 0` — non-zero amounts are rejected
-- Credential spent set is separate from the value token spent set
-- Same BDHKE + DLEQ cryptography as value tokens
-- No modification to any `/v1/*` Cashu endpoint
-
-### Credential Endpoints
-
-Accessible at `/cred/v1/*` (authenticated) and `/cred/v1/*` (when Eyre binding is active):
+**`/cred/v1/*` is public.** Anyone can issue credentials on any active plain credential keyset,
+so a plain keyset is not access control. To control who can get tokens, use a **service** with
+an allowlist (below).
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/cred/v1/keys` | Active credential keyset public keys |
-| GET | `/cred/v1/keys/{keyset_id}` | Specific credential keyset keys |
-| GET | `/cred/v1/keysets` | Credential keyset metadata (IDs + active status) |
-| POST | `/cred/v1/issue` | Issue credential tokens (blind sign) |
-| POST | `/cred/v1/verify` | Check validity + spent status (read-only) |
-| POST | `/cred/v1/redeem` | Verify and mark as spent |
+| GET | `/cred/v1/keys` | Active plain (non-service) keysets with keys |
+| GET | `/cred/v1/keys/{keyset_id}` | Any credential keyset's public key, service keysets included |
+| GET | `/cred/v1/keysets` | Plain keysets' ids and active flags |
+| POST | `/cred/v1/issue` | Blind-sign outputs `{outputs: [{B_, amount: 0, id}]}` |
+| POST | `/cred/v1/verify` | Check proofs without spending → `{valid: [{secret, valid, spent}]}` |
+| POST | `/cred/v1/redeem` | Verify and spend every proof, or none → `{redeemed: [{secret, redeemed}]}` |
 
-### Credential Admin Endpoints
+`issue` answers 200 with one entry per output: a signature, or `{"error": "<code>"}` for an output
+it could not sign (`credential-amount-must-be-zero`, `missing-B_`, `invalid-B_-point`,
+`missing-keyset-id`, `unknown-credential-keyset`, `credential-keyset-inactive`). `redeem` refuses
+the whole batch with a 400: `invalid-credential` (bad signature, unknown or service keyset,
+secret over 2048 bytes), `duplicate-credential`, `credential-already-spent`. On every POST, a
+missing or empty array is `400 missing-outputs` / `empty-outputs` (or `-proofs`); on `issue`, two
+outputs with one x-coordinate are `400 duplicate-output`.
 
-Under `/apps/ecash-services/admin/api/cred/*`:
+### Flow
 
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/cred/keysets/generate` | Generate new credential keyset (active by default) |
-| POST | `/cred/keysets/activate` | Activate credential keyset `{id}` |
-| POST | `/cred/keysets/deactivate` | Deactivate credential keyset `{id}` |
-| GET | `/cred/overview` | Credential stats (keysets, issued, spent) |
-
-### Credential Flow
-
-**1. Setup (one-time, by mint admin or space app):**
 ```
-POST /apps/ecash-services/admin/api/cred/keysets/generate
-→ {"id": "c0abc...", "active": true, "keys": {"0": "02pubkey..."}}
+POST /apps/ecash-services/admin/api/cred/keysets/generate      (admin)
+→ {"id": "c0…", "active": true, "keys": {"0": "02…"}}
+
+POST /cred/v1/issue    {"outputs": [{"B_": "02…", "amount": 0, "id": "c0…"}]}
+→ {"signatures": [{"C_": "02…", "amount": 0, "id": "c0…", "dleq": {…}}]}
+# unblind client-side: C = C_ − r·K
+
+POST /cred/v1/verify   {"proofs": [{"C": "02…", "secret": "…", "amount": 0, "id": "c0…"}]}
+→ {"valid": [{"secret": "…", "valid": true, "spent": false}]}
+
+POST /cred/v1/redeem   {"proofs": [...]}
+→ {"redeemed": [{"secret": "…", "redeemed": true}]}
 ```
-
-**2. Issuing credentials (space app, after verifying payment):**
-```javascript
-// Get credential keyset public key
-GET /cred/v1/keys
-→ {"keysets": [{"id": "c0abc...", "keys": {"0": "02pubkey..."}}]}
-
-// Create blinded outputs (client-side BDHKE)
-// For each credential:
-//   secret = random unique string
-//   Y = hashToCurve(secret)
-//   k = random blinding factor
-//   B_ = Y + k*G
-outputs = [
-  {"B_": "02blinded...", "amount": 0, "id": "c0abc..."},
-  // ... repeat for N credentials
-]
-
-// Request blind signatures
-POST /cred/v1/issue
-{"outputs": [...]}
-→ {"signatures": [{"C_": "02signed...", "amount": 0, "id": "c0abc...", "dleq": {...}}, ...]}
-
-// Unblind each token (client-side):
-// C = C_ - k * pubkey
-```
-
-**3. Verifying a credential (space app, on each access request):**
-```
-POST /cred/v1/verify
-{"proofs": [{"C": "02unblinded...", "secret": "...", "amount": 0, "id": "c0abc..."}]}
-→ {"valid": [{"secret": "...", "valid": true, "spent": false}]}
-```
-
-**4. Consuming a credential (space app, marks as permanently used):**
-```
-POST /cred/v1/redeem
-{"proofs": [{"C": "02unblinded...", "secret": "...", "amount": 0, "id": "c0abc..."}]}
-→ {"redeemed": [{"secret": "...", "redeemed": true}]}
-```
-
-A redeemed credential cannot be redeemed again — the mint returns `credential-already-spent`.
-
-### Error Responses
-
-| Error | Cause |
-|-------|-------|
-| `credential-amount-must-be-zero` | Output has non-zero amount |
-| `missing-keyset-id` | Output missing `id` field |
-| `unknown-credential-keyset` | Keyset ID not found in credential keysets |
-| `credential-keyset-inactive` | Keyset has been deactivated |
-| `invalid-credential` | Signature verification failed |
-| `credential-already-spent` | Token was already redeemed |
 
 ---
 
-## Services Layer (non-value-bearing access control)
+## Services (access control)
 
-The services layer builds on the credential extension to provide named, scoped access-control tokens. Where `/cred/v1/*` exposes raw credential keysets for power users, `/services/v1/*` gives each application its own named scope with policy: an expiration, an issuance cap, an optional API-key allowlist, and per-service metadata you can surface in a UI.
-
-### Model
-
-A **service** is a named wrapper around a dedicated `cred-keyset`:
+A **service** is a named scope with its own dedicated credential keyset, made when the service
+is created and never shared. A token signed for `chat` does not verify for `vip`.
 
 | Field | Meaning |
 |---|---|
-| `name` | URL slug (e.g. `chat`, `vip`, `api-tier-1`) |
-| `title` / `description` | Human-readable metadata |
-| `kind` | `single-use` (phase 1 / phase 2 only kind) |
-| `ks_id` | Backing credential keyset ID — auto-generated on `create`, never shared between services |
-| `active` | If false, issue/verify/redeem return 400 `service-inactive` |
-| `expires` | Optional hard cutoff (unix seconds). Past-expiry → 400 `service-expired` across all endpoints |
-| `max_issuance` | Optional cap on tokens ever issued; over-cap → 400 `service-issuance-cap-reached` |
-| `issued` / `redeemed` | Running counters |
-| `allowlist` | Set of plaintext API keys. Empty → `/issue` is public. Non-empty → caller must supply matching `access_key` in the issue body |
+| `name` | URL slug: 1–64 of `a-z 0-9 _ -`, not `list` |
+| `title`, `description` | Display text |
+| `kind` | `single-use` (the only kind) |
+| `ks_id` | The service's keyset id |
+| `active` | If false, issue/verify/redeem answer `400 service-inactive` |
+| `expires` | Optional cutoff, unix seconds. After it: `400 service-expired` |
+| `max_issuance` | Optional cap on tokens ever issued |
+| `issued`, `redeemed` | Counters |
+| `allowlist` | API keys. Empty: anyone can issue. Non-empty: `issue` needs a matching `access_key` |
 
-Because each service has a **dedicated keyset** auto-generated at `create` time, cross-service token reuse is impossible at the crypto layer: a chat token is signed by chat's private key and simply won't verify against vip's keyset. You don't need additional binding logic to enforce scoping.
-
-### Public Endpoints
-
-Under `/services/v1/*` (unauthenticated):
+### Public endpoints
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/services/v1/list` | Active services only. Each entry shows `name`, `title`, `description`, `kind`, `ks_id`, `active`, `issued`, `redeemed`, `allowlist_count`, `allowlist_required`, `expires`, `max_issuance`, `created`. No plaintext keys are ever returned on this endpoint. |
-| GET | `/services/v1/{name}` | Service detail (public view — same shape as list entry, no plaintext keys) |
-| POST | `/services/v1/{name}/issue` | Blind-sign outputs. Body: `{access_key?, outputs: [{B_, amount: 0, id}]}`. Returns `{signatures: [...]}`. Gated by allowlist when set. |
-| POST | `/services/v1/{name}/verify` | Verify proofs without spending. Body: `{proofs: [...]}`. Returns `{results: [{secret, valid, spent}]}`. Always public. |
-| POST | `/services/v1/{name}/redeem` | Verify and idempotently mark as spent. Body: `{proofs: [...]}`. Returns `{redeemed: [{secret, status}]}` where `status` is `fresh` (first redemption) or `replay` (already spent — retry after network drop). Always public. |
+| GET | `/services/v1/list` | Active services (no allowlist keys, only `allowlist_count` and `allowlist_required`) |
+| GET | `/services/v1/{name}` | One service; 404 if unknown, inactive or expired |
+| POST | `/services/v1/{name}/issue` | `{access_key?, outputs: [{B_, amount: 0}]}` → `{signatures}`. Signs with the service's keyset whatever `id` an output names |
+| POST | `/services/v1/{name}/verify` | `{proofs}` → `{results: [{secret, valid, spent}]}` |
+| POST | `/services/v1/{name}/redeem` | `{proofs}` → `{redeemed: [{secret, status}]}` |
 
-### Redemption Semantics (idempotent replay)
+`issue`, `verify` and `redeem` on an unknown service answer `404 service-not-found`. `verify` and
+`redeem` are never allowlist-gated: anyone holding a valid token can use it.
 
-Redeem is safe to retry:
+### Redeem: grant access only on `fresh`
 
-- All proofs valid and fresh → 200, each marked `status: fresh`, `cred-spent` updated, `service.redeemed` incremented
-- All proofs valid, already spent via this service → 200, each marked `status: replay`, **no state change**
-- Any proof fails crypto verification (bad signature or wrong keyset) → 400 `invalid-service-token` for the whole batch
+- All proofs valid: 200, and each gets its own `status`: `fresh` (it was unspent and is spent
+  now) or `replay` (it was already spent; nothing changes).
+- Any invalid proof (bad signature, another service's keyset): `400 invalid-service-token` for
+  the whole batch.
 
-Callers that want to know whether a token was first-use vs retry can inspect the per-token `status` field. Callers that don't care can treat any 200 as "token accepted."
+**Grant access only for `status: "fresh"`.** `replay` means the token was redeemed before,
+possibly by someone else; do not treat a 200 as acceptance. A retry after a lost answer also
+sees `replay`, and can't tell whether its own first attempt or someone else spent the token.
 
-### Allowlist Gating
-
-Each service has an `allowlist` set. When empty (the default on create), `/issue` is public — any caller can mint credentials for the service. When non-empty, the caller must include `access_key` in the request body, and its value must be in the allowlist, else 403 `service-access-denied`. `/verify` and `/redeem` are never gated — anyone with a valid token can use it.
-
-The admin dashboard renders plaintext keys (admin-only). Public GET endpoints only expose `allowlist_count` and `allowlist_required`, never the keys themselves.
+### Allowlist
 
 ```bash
-# Operator creates a gated service:
+# create a service and give one client a key (admin, cookie-authenticated):
 curl -X POST http://localhost:8080/apps/ecash-services/admin/api/services/create \
-  -H "Cookie: urbauth-~zod=..." -H "Content-Type: application/json" \
-  -d '{"name": "vip", "title": "VIP", "description": "Paid tier access"}'
-
-# Operator adds a key and hands it to an authorized client out of band:
+  -H "Cookie: urbauth-~zod=…" -H "Content-Type: application/json" \
+  -d '{"name": "vip", "title": "VIP", "description": "Paid tier"}'
 curl -X POST http://localhost:8080/apps/ecash-services/admin/api/services/allowlist/add \
-  -H "Cookie: urbauth-~zod=..." -H "Content-Type: application/json" \
+  -H "Cookie: urbauth-~zod=…" -H "Content-Type: application/json" \
   -d '{"name": "vip", "key": "bus-secret-xyz"}'
 
-# Authorized client mints credentials (no urbauth required, just the key):
-curl -X POST http://localhost:8080/services/v1/vip/issue \
-  -H "Content-Type: application/json" \
-  -d '{"access_key": "bus-secret-xyz", "outputs": [{"B_": "02...", "amount": 0, "id": "c0..."}]}'
+# the client issues with its key (no cookie):
+curl -X POST http://localhost:8080/services/v1/vip/issue -H "Content-Type: application/json" \
+  -d '{"access_key": "bus-secret-xyz", "outputs": [{"B_": "02…", "amount": 0}]}'
 
-# Anyone holding a valid VIP token can redeem — no key needed:
-curl -X POST http://localhost:8080/services/v1/vip/redeem \
-  -H "Content-Type: application/json" \
-  -d '{"proofs": [{"C": "02...", "secret": "...", "amount": 0, "id": "c0..."}]}'
+# anyone holding a token redeems it:
+curl -X POST http://localhost:8080/services/v1/vip/redeem -H "Content-Type: application/json" \
+  -d '{"proofs": [{"C": "02…", "secret": "…", "amount": 0, "id": "c0…"}]}'
 ```
 
-### Services Error Responses
+### Admin API (`%ecash-services`)
+
+Base path `/apps/ecash-services/admin/api`, same cookie and same-origin rules as the mint's.
+
+| Method | Path | Body | Description |
+|---|---|---|---|
+| GET | `/cred/overview` | — | Counts, and each keyset's `id`, `active`, `service_scoped`, `service` |
+| POST | `/cred/keysets/generate` | — | New plain keyset, active |
+| POST | `/cred/keysets/activate` | `{id}` | Refuses a service keyset (`keyset-is-service-scoped`) |
+| POST | `/cred/keysets/deactivate` | `{id}` | Same |
+| GET | `/services` | — | All services, with plaintext allowlist keys |
+| GET | `/services/{name}` | — | One service, with its keys |
+| POST | `/services/create` | `{name, title, description?, expires?, max_issuance?}` | Makes the service and its keyset |
+| POST | `/services/update` | `{name, title?, description?, expires?, max_issuance?}` | Absent: unchanged. `null`: cleared |
+| POST | `/services/activate` | `{name}` | |
+| POST | `/services/deactivate` | `{name}` | |
+| POST | `/services/delete` | `{name}` | Only if inactive and it never issued; its keyset is deactivated |
+| POST | `/services/allowlist/add` | `{name, key}` | |
+| POST | `/services/allowlist/remove` | `{name, key}` | |
+
+`expires` and `max_issuance` must be `null` or a bare non-negative integer.
+
+### Services errors
 
 | Error | HTTP | Cause |
 |-------|------|-------|
-| `service-not-found` | 404 | `name` does not resolve to a service |
+| `service-not-found` | 404 | No service by that name |
 | `service-inactive` | 400 | Service is deactivated |
-| `service-expired` | 400 | `expires` is set and in the past |
-| `service-issuance-cap-reached` | 400 | `max_issuance` would be exceeded by this issue call |
-| `service-access-denied` | 403 | Allowlist is non-empty and `access_key` is missing or wrong |
-| `invalid-service-token` | 400 | At least one proof failed crypto verification or was signed by a different keyset |
-| `service-already-exists` | 409 | Create called with a name that is already registered |
-| `service-has-issued-tokens` | 400 | Delete attempted on a service that ever issued a token (use deactivate instead) |
-| `deactivate-before-delete` | 400 | Delete attempted while `active=true` |
+| `service-expired` | 400 | `expires` has passed |
+| `service-issuance-cap-reached` | 400 | This issue would pass `max_issuance` |
+| `service-access-denied` | 403 | Allowlist is set and `access_key` is missing or wrong |
+| `invalid-service-token` | 400 | A proof failed verification or names another keyset |
+| `duplicate-service-token` | 400 | One proof twice in a batch |
+| `duplicate-output` | 400 | Two outputs share an x-coordinate |
+| `missing-proofs`, `empty-proofs`, `missing-outputs`, `empty-outputs` | 400 | Missing or empty batch |
+| `invalid-service-name` | 400 | Name not 1–64 of `a-z 0-9 _ -`, or `list` |
+| `missing-name`, `missing-title`, `missing-key` | 400 | Required admin field missing |
+| `invalid-expires`, `invalid-max-issuance` | 400 | Not `null` or a non-negative integer |
+| `service-already-exists` | 409 | Name taken |
+| `deactivate-before-delete` | 400 | Delete while active |
+| `service-has-issued-tokens` | 400 | Delete of a service that ever issued (deactivate it instead) |
+| `keyset-is-service-scoped` | 400 | Cred activate/deactivate on a service's keyset |
 
 ---
 
@@ -489,136 +481,102 @@ curl -X POST http://localhost:8080/services/v1/vip/redeem \
 
 ### secp256k1
 
-Public keys are generated using `priv-to-pub:secp256k1:secp:crypto` from zuse (jet-accelerated). BDHKE point operations use pure Hoon arithmetic in `lib/curve.hoon` — scalar multiplication runs in **Jacobian coordinates** (one field inversion per scalar-mult instead of one per point op, ~7× faster than naive affine; `npm run bench`).
+All point arithmetic is pure Hoon in `lib/curve.hoon`. Every scalar multiplication, public keys
+included, runs a fixed-length Montgomery ladder in Jacobian coordinates (257 steps for every
+scalar). zuse's `priv-to-pub` is not used. Because none of this is jetted, each signature or
+proof check costs real CPU on the ship (`npm run bench` times signing, on a test ship: it turns
+on the `self` method).
 
-### BDHKE (Blind Diffie-Hellman Key Exchange)
+### BDHKE
 
 ```
-Wallet:  Y = hashToCurve(secret)
-         B_ = Y + k*G                    (blinded message)
-Mint:    C_ = privkey * B_               (blind signature)
-Wallet:  C  = C_ - k*pubkey             (unblind)
-Verify:  C  == privkey * hashToCurve(secret)
+Wallet:  Y  = hashToCurve(secret)
+         B_ = Y + r·G                  (blinded message)
+Mint:    C_ = k·B_                     (blind signature)
+Wallet:  C  = C_ − r·K                 (unblind; K = k·G)
+Verify:  C == k·hashToCurve(secret)
 ```
 
-### DLEQ Proofs
+### DLEQ proofs
 
-Every blind signature includes a DLEQ proof (Fiat-Shamir sigma protocol) proving the mint used the correct private key without revealing it.
+Every blind signature carries a NUT-12 DLEQ proof that the mint used the key it publishes. The
+proof nonce is bound to the full B_ and C_ points.
 
-### Hash-to-Curve
+### Hash-to-curve
 
-Domain-separated SHA-256 with counter-based retry:
 ```
-domain_sep = "Secp256k1_HashToCurve_Cashu_"
-msg_hash = SHA256(domain_sep || secret_bytes)
-for counter in 0..65535:
-  h = SHA256(msg_hash || counter_le_bytes)
-  try: return point_from_x(0x02 || h)
+msg_hash = SHA256("Secp256k1_HashToCurve_Cashu_" || secret)
+for counter = 0, 1, 2, …:
+  x = SHA256(msg_hash || counter as 4 little-endian bytes)
+  if 02||x is a point on the curve: return it
 ```
 
 ---
 
 ## Testing
 
-**Prerequisites:** Node.js with `@noble/secp256k1`, `@noble/curves`, and `@noble/hashes`.
+**JS suites** run against a live ship. They need Node.js (the version in `package.json`
+`engines`) and `npm install`:
 
 ```bash
-npm install @noble/secp256k1 @noble/curves @noble/hashes
+npm install
+SHIP_URL=http://localhost:8080 URBAUTH_COOKIE='urbauth-~zod=0v…' npm run test:all
+npm run test:p2pk        # one suite
 ```
 
-**End-to-end tests** (sat flows):
-```bash
-node test-e2e.mjs          # mint / swap / checkstate / melt with change  (9)
-node test-vectors.mjs      # NUT-00 hash-to-curve test vectors             (3)
-node test-p2pk.mjs         # P2PK / NUT-11 coverage                        (8)
-```
+- They need both `%ecash` and `%ecash-services` installed on the ship.
+- The Lightning suites use a mock LNbits (`mock-lnbits.mjs`).
+- Suites that change mint settings refuse a `SHIP_URL` that isn't this machine unless
+  `ALLOW_DESTRUCTIVE=1`. **Never run the suites against a mint holding real value.**
 
-**Services tests** (the services layer):
-```bash
-node test-services.mjs     # create/issue/verify/redeem, allowlist,
-                           # expiration, max-issuance, idempotent replay  (34)
-```
-
-**Credential tests** (generate a credential keyset first via the admin API):
-```bash
-node test-cred.mjs         # 31 tests against /cred/v1/*
-```
-
-**Lightning tests** (requires mock LNbits):
-```bash
-node mock-lnbits.mjs &     # Start mock on port 3338
-# Configure mint: :ecash [%lnbits 'http://localhost:3338' 'test-api-key']
-node test-lightning.mjs    # bolt11 integration coverage
-```
-
-**Security tests (Phase 1):**
-```bash
-URBAUTH_COOKIE=<ship-cookie> npm run test:security
-# admin auth (401/200), legacy endpoints removed (404),
-# parse robustness (400 not crash), self-method gating (disabled→400)
-```
-
-**Wallet conformance (Phase 2):** drives the real [`@cashu/cashu-ts`](https://github.com/cashubtc/cashu-ts)
-library through the full standard flow (loadMint → mint → swap → receive → melt) and verifies
-the mint's NUT-12 DLEQ proofs. The mint's keyset IDs match cashu-ts's `deriveKeysetId` (NUT-02)
-and its DLEQ proofs pass `hasValidDleq`.
-```bash
-node mock-lnbits.mjs &                          # mock Lightning on :3338
-URBAUTH_COOKIE=<ship-cookie> npm run test:conformance
-```
-
-**Hoon unit tests:**
-```
--test /=ecash=/tests/test/hoon
-```
-
-The JS suites assert mint/swap/melt value conservation, NUT-12 DLEQ, P2PK multisig, credentials, service scoping, admin auth, and parse robustness. Run `npm run test:all` for the full set.
+**Hoon unit suites** live in `tests/lib/*.hoon` and run on a separate `%ecash-test` desk with the
+vendored hoon-test-kit: `scripts/hoon-test-kit/hoon-test.sh <pier>` (config in `hoon-test.conf`).
+See [`docs/hoon-testing.md`](docs/hoon-testing.md).
 
 ---
 
 ## State
 
-The `%ecash` agent state (version 13) contains (the credential/services fields moved to the
-`%ecash-services` agent; later migrations added the bolt11 melt-reconciliation state):
+The `%ecash` agent is at **state 15**. It loads state 13 or later; a mint below 13 must first
+upgrade through commit `eb7b56a`. Credential and service data live in `%ecash-services`
+(state 1; it loads 0 or 1).
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `keysets` | `(map @t keyset)` | Value keysets (pubkeys, privkeys, unit, fee) |
-| `active-keyset` | `@t` | Currently active keyset ID |
-| `spent` / `spent-ys` | `(set @t)` | Spent secrets and Y-points (double-spend prevention) |
-| `counter` | `@ud` | Total value tokens issued |
-| `mint-quotes` / `melt-quotes` | `(map @t quote)` | Active and historical quotes |
-| `ln-config` | `ln-backend` | Lightning backend (lnbits/lnd/none) |
-| `pending` | `(map @ta pending-req)` | In-flight Lightning HTTP requests |
-| `total-issued-sats` / `total-redeemed-sats` | `@ud` | Liability tracking |
-| `mint-name` / `mint-description` | `@t` | NUT-06 mint metadata |
-| `fee-reserve-pct` / `fee-reserve-min` | `@ud` | Melt fee reserve config |
-| `quote-ttl-secs` | `@ud` | Quote expiry duration |
-| `melt-change` | `(map @t (list json))` | NUT-08 change signatures keyed by melt quote-id |
-| `self-method-enabled` | `?` | Whether the no-payment `self` mint/melt method is enabled (default off) |
-
-State migrations are handled automatically across all versions (state-6 through state-13). The
-state-10→11 migration drops the `cred-keysets` / `cred-spent` / `cred-counter` / `services`
-fields, which now live in the `%ecash-services` agent (`state-0` there); later migrations add
-the bolt11-melt reconciliation state (`pending`/`melt-inflight`). Historical versions before
-state-6 have been dropped from the migration chain since there are no known deployments at those
-versions.
+| `keysets` | `(map @t keyset)` | Value keysets (public and private keys, unit, fee) |
+| `active-keyset` | `@t` | The keyset new outputs are signed with |
+| `spent` / `spent-ys` | `(set @t)` | Spent secrets and Y points |
+| `counter` | `@ud` | Value signatures issued |
+| `mint-quotes` / `melt-quotes` | `(map @t …-quote)` | Quotes |
+| `ln-config` | `ln-backend` | Lightning backend (`lnbits`, `lnd` or `none`) |
+| `pending` | `(map @ta pending-req-v2)` | In-flight Lightning HTTP requests |
+| `total-issued-sats` / `total-redeemed-sats` | `@ud` | Liability counters |
+| `mint-name` / `mint-description` | `@t` | NUT-06 metadata |
+| `fee-reserve-pct` / `fee-reserve-min` | `@ud` | Melt fee reserve (basis points, sats) |
+| `quote-ttl-secs` | `@ud` | Quote lifetime |
+| `melt-change` | `(map @t (list json))` | NUT-08 change signatures by melt quote id |
+| `self-method-enabled` | `?` | The no-payment `self` method (default off) |
+| `melt-inflight` | `(map @t melt-inflight-entry)` | Per PENDING bolt11 melt: the secrets and Ys it spent, input total, blank change outputs, overpayment. Survives restarts |
+| `restore` | `(map @t restored-sig)` | Every issued signature by its B_, for NUT-09 restore and `output-already-signed` |
 
 ## License
 
-[PolyForm Noncommercial License 1.0.0](LICENSE.md) — source-available; free for noncommercial
-use. See `LICENSE.md` for terms.
+[PolyForm Noncommercial License 1.0.0](LICENSE.md): source-available, free for noncommercial
+use. See `LICENSE.md`.
 
 ## Security
 
-This mint handles value. It went through multiple adversarial security audits; the threat model
-and operator procedures (especially Lightning melt reconciliation and stuck-payment recovery)
-are documented in [`docs/operator-runbook.md`](docs/operator-runbook.md). Before running against
-real value, read the runbook, start on a freshly-generated keyset, and do a small live shakedown
-against your Lightning backend.
+This mint handles value. Before running it against real money, read
+[`docs/operator-runbook.md`](docs/operator-runbook.md) (melt safety, stuck-payment recovery,
+backup, incident response), start on a freshly generated keyset, and do a small live test
+against your Lightning backend. Known limits:
 
----
-
-*Built on Urbit vere-4.3, zuse kelvin 409*
-*Cashu protocol: https://cashu.space*
-*secp256k1 (browser): @noble/secp256k1 v1.7.1 via esm.sh*
+- **CPU is the attack surface.** Pure-Hoon elliptic-curve math makes each request expensive (a
+  100-proof swap takes seconds of ship CPU) and the ship handles one event at a time. There is
+  no rate limit in the mint; a rate-limiting reverse proxy is the main abuse control
+  ([`docs/INSTALL.md`](docs/INSTALL.md)).
+- **LND is untested** against a real node. Use LNbits for real funds.
+- **`self` method**: never enable it on a mint with a real Lightning backend.
+- **Response readable by another ship.** An agent can't tell eyre's requests from a remote
+  ship's subscription, so a foreign ship that guessed an in-flight request id could read that
+  response.

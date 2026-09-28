@@ -6,584 +6,482 @@ user-invocable: true
 
 # Integrating Ecash Payments into Urbit Apps
 
-This guide explains how to gate an Urbit Gall agent's services behind Cashu ecash payments. The user pays ecash tokens to your app, your app verifies them with the mint, and the user gets whitelisted for a period of time.
+How to gate a Gall agent's features behind Cashu ecash payments: a user sends your app ecash
+tokens, your app swaps them at the mint (which proves they were real and unspent), and the user
+is whitelisted for a while.
 
-This works with any Cashu-compliant mint. The examples assume the mint runs on the same ship at `localhost:8080`, but the pattern works with any mint URL.
+This works with any Cashu mint. The examples assume the `%ecash` mint on the same ship at
+`http://localhost:8080`.
 
 ---
 
 ## Concepts
 
-### What is Cashu ecash?
+### Cashu ecash
 
-Cashu is a protocol for **blind signature-based ecash**. A mint issues cryptographically signed tokens that are:
+A mint issues blind-signed tokens that are:
 
-- **Bearer instruments** — whoever holds the token can spend it
-- **Unlinkable** — the mint cannot connect issuance to redemption (blind signatures)
-- **Divisible** — tokens come in fixed denominations (1, 2, 4, 8, 16... sats)
-- **Double-spend protected** — the mint tracks spent secrets
+- **Bearer**: whoever holds a token can spend it.
+- **Unlinkable**: the mint can't connect issuance to redemption.
+- **Fixed denominations**: powers of two (1, 2, 4, 8 … sats), up to the keyset's largest key.
+- **Single-use**: the mint records every spent secret.
 
-### Token structure
-
-A Cashu token (called a "proof") has four fields:
+### A token ("proof")
 
 ```json
 {
-  "C": "02abc...",      // unblinded signature (compressed point, 33 bytes hex)
-  "secret": "unique-random-string",
-  "amount": 4,          // denomination in sats
-  "id": "01abc..."      // keyset ID (identifies which mint key signed it)
+  "amount": 4,            // denomination in sats
+  "id": "01abc…",         // keyset id: which mint key signed it
+  "secret": "…",          // at most 2048 bytes at the %ecash mint
+  "C": "02abc…"           // unblinded signature, compressed point (66 hex chars)
 }
 ```
 
-### How verification works
+### Verify by swapping
 
-To verify and redeem tokens, your app **swaps** them at the mint. A swap atomically:
+To accept tokens, your app **swaps** them at the mint (`POST /v1/swap`). A swap, all at once:
 
-1. Verifies each input token's signature is valid
-2. Checks none of the tokens have been spent before
-3. Marks the input tokens as spent (they can never be used again)
-4. Signs new output tokens of equal total value
+1. checks each input's signature,
+2. checks none was spent,
+3. marks them spent,
+4. signs new outputs worth the inputs minus the input fee.
 
-This is the key insight: **you don't just "check" tokens — you swap them for fresh ones**. This guarantees atomic double-spend prevention. If the swap succeeds, the payment is real and final.
+If the swap succeeds, the payment is real and final. Checking without swapping
+(`/v1/checkstate`) proves nothing: the payer can spend the token elsewhere a moment later.
 
-If your app only needs to verify payment (not hold a balance), you can discard the output tokens. If your app wants to accumulate a balance (to pay others later), keep the outputs.
+The **input fee** is `ceil(sum of each input's keyset input_fee_ppk / 1000)` sats. The outputs
+must total exactly `inputs − fee`, or the mint answers `400 amounts-do-not-balance`. Credit the
+payer with the net amount.
 
 ---
 
 ## Architecture
 
-### Payment flow
-
 ```
-┌──────┐                    ┌──────────┐                    ┌──────┐
-│ User │                    │ Your App │                    │ Mint │
-└──┬───┘                    └────┬─────┘                    └──┬───┘
-   │                             │                             │
-   │  1. Request access          │                             │
-   ├────────────────────────────>│                             │
-   │                             │                             │
-   │  2. "Pay X sats"           │                             │
-   │<────────────────────────────┤                             │
-   │                             │                             │
-   │  3. Send ecash tokens      │                             │
-   ├────────────────────────────>│                             │
-   │                             │                             │
-   │                             │  4. POST /v1/swap           │
-   │                             ├────────────────────────────>│
-   │                             │                             │
-   │                             │  5. {signatures: [...]}     │
-   │                             │<────────────────────────────┤
-   │                             │                             │
-   │  6. "Access granted        │                             │
-   │      until <expiry>"       │                             │
-   │<────────────────────────────┤                             │
+User                         Your app                          Mint
+ │  1. ask for access           │                                │
+ ├─────────────────────────────>│                                │
+ │  2. "pay N sats"             │                                │
+ │<─────────────────────────────┤                                │
+ │  3. ecash tokens (a poke)    │                                │
+ ├─────────────────────────────>│  4. POST /v1/swap (iris)       │
+ │                              ├───────────────────────────────>│
+ │                              │  5. 200 {signatures: [...]}    │
+ │                              │<───────────────────────────────┤
+ │  6. access until <expiry>    │                                │
+ │<─────────────────────────────┤                                │
 ```
 
-### What your app needs
+### What your desk needs
 
-1. **A poke handler** that accepts ecash tokens from users
-2. **An iris HTTP call** to swap the tokens at the mint (verification)
-3. **A whitelist** in state tracking who paid and when they expire
-4. **Access checks** on gated operations
+Copy **both** `lib/curve.hoon` and `lib/bdhke.hoon` from the ecash repo's `desk/lib/` into your
+desk: `bdhke` imports `curve`. Import them with `/+  *curve, *bdhke`.
+
+The arms you will use:
+
+| Arm | Sample → product | Does |
+|---|---|---|
+| `make-output` (bdhke) | `[amount=@ud keyset-id=@t eny=@]` → `[b-hex=@t secret=@t blinding-factor=@]` | A random secret, blinded. Only `eny` affects the result. |
+| `split-amount` (bdhke) | `total=@ud` → `(list @ud)` | Powers of two, largest first: `(split-amount 5)` is `~[4 1]`. No cap on size. |
+| `blind-message` (bdhke) | `[secret=@t r=@]` → `[b-prime=point blinding-factor=@]` | `B_ = Y + r·G` |
+| `unblind-signature` (bdhke) | `[c-=point r=@ mint-key=point]` → `point` | `C = C_ − r·K` |
+| `dleq-verify` (bdhke) | `[b-=point c-=point a-pub=point e=@ s=@]` → `?` | Checks the mint's NUT-12 proof |
+| `hash-to-curve` (bdhke) | `msg=@` → `point` | `Y` for a secret (for `/v1/checkstate`) |
+| `hex-to-pt` (curve) | `hex=@t` → `(unit point)` | Parse a compressed point |
+| `pt-to-hex` (curve) | `p=point` → `@t` | Compressed hex |
+| `hex-decode` (curve) | `hex=@t` → `@` | Hex to atom (for DLEQ `e`, `s`) |
 
 ---
 
-## Implementation
+## Implementation: a complete paywall agent
 
-### Step 1: Define state
-
-Add payment tracking to your agent's state:
+One file, `app/paywall.hoon`. The helper core `pay` holds the logic and sees `bowl` and state.
 
 ```hoon
-+$  payment-record
-  $:  who=@p               ::  who paid
-      amount=@ud            ::  sats paid
-      expiry=@da            ::  when access expires
-  ==
-
+::  app/paywall.hoon: access for ecash paid to a Cashu mint
+::
+/+  default-agent, dbug, *curve, *bdhke
+|%
++$  payment-record  [amount=@ud expiry=@da]
++$  pending-payment  [who=@p amount=@ud]
 +$  state-0
   $:  %0
       whitelist=(map @p payment-record)
-      ::  ... your other state fields
+      pending-payments=(map @ta pending-payment)
+      mint-url=@t          ::  e.g. 'http://localhost:8080', no trailing slash
+      keyset-id=@t         ::  the mint's active keyset (GET /v1/keys)
+      top-denom=@ud        ::  that keyset's largest denomination
+      fees=(map @t @ud)    ::  input_fee_ppk by keyset id (GET /v1/keysets)
   ==
-```
-
-### Step 2: Define the payment poke mark
-
-Create a mark file at `mar/ecash-payment.hoon` or use `%json`. The simplest approach is accepting JSON via `%handle-http-request` or a custom mark.
-
-The token format your app receives from users:
-
-```json
-{
-  "action": "pay",
-  "proofs": [
-    {"C": "02...", "secret": "...", "amount": 4, "id": "01..."},
-    {"C": "02...", "secret": "...", "amount": 1, "id": "01..."}
-  ]
-}
-```
-
-### Step 3: Verify tokens by swapping at the mint
-
-When your app receives tokens, it must swap them at the mint to verify they're real and unspent. This is an HTTP POST to the mint's `/v1/swap` endpoint via iris.
-
-**Building the swap request:**
-
-Your app needs to provide `inputs` (the user's tokens) and `outputs` (blinded messages for new tokens). The output total must equal the input total minus any fees.
-
-For a **verify-and-discard** pattern (you just want to confirm payment, not hold tokens), you still need valid outputs. The simplest approach: generate a random secret, compute `B_ = hashToCurve(secret)` (no blinding factor needed if you're discarding), and request a single output for the full amount.
-
-However, since BDHKE requires proper blinding, the practical approach is:
-
-**Option A: Use `make-output` from the BDHKE library**
-
-The simplest verification is to swap the user's tokens for a token you control. Import the BDHKE library (which includes wallet-side helpers):
-
-```hoon
-/+  *bdhke
-```
-
-The library provides:
-- `make-output` — generates a random secret, blinds it, returns `[B_hex secret blinding-factor]`
-- `split-amount` — splits a sat total into power-of-2 denominations (e.g., 5 -> ~[1 4])
-- `blind-message` — low-level: blinds a secret with a given r, returns `[B_ r-mod]`
-- `unblind-signature` — low-level: unblinds `C_ - r*K` to get the final token `C`
-
-Build a swap request using `make-output`:
-
-```hoon
-++  build-swap-request
-  |=  [proofs=(list json) total=@ud keyset-id=@t]
-  ^-  json
-  ::  Split total into denominations and generate blinded outputs
-  =/  denoms=(list @ud)  (split-amount total)
-  =/  outputs=(list json)
-    =/  idx=@ud  0
-    =/  acc=(list json)  ~
-    |-
-    ?~  denoms  (flop acc)
-    =/  eny-i  (shax (add eny.bowl idx))
-    =/  [b-hex=@t secret=@t r=@]  (make-output i.denoms keyset-id eny-i)
-    %=  $
-      denoms  t.denoms
-      idx     +(idx)
-      acc     :_  acc
-              %-  pairs:enjs:format
-              :~  ['B_' s+b-hex]
-                  ['amount' (numb:enjs:format i.denoms)]
-                  ['id' s+keyset-id]
-              ==
-    ==
-  %-  pairs:enjs:format
-  :~  ['inputs' [%a proofs]]
-      ['outputs' [%a outputs]]
++$  card  card:agent:gall
+--
+%-  agent:dbug
+^-  agent:gall
+=<
+=|  state-0
+=*  state  -
+|_  =bowl:gall
++*  this  .
+    def   ~(. (default-agent this %.n) bowl)
+    hc    ~(. pay [bowl state])
+++  on-init  ^-  (quip card _this)  `this
+++  on-save  ^-  vase  !>(state)
+++  on-load
+  |=  old=vase
+  ^-  (quip card _this)
+  `this(state !<(state-0 old))
+++  on-poke
+  |=  [=mark =vase]
+  ^-  (quip card _this)
+  ?+  mark  (on-poke:def mark vase)
+  ::  a payment: the payer's proofs
+      %ecash-payment
+    =^  cards  state  (take-payment:hc !<((list json) vase))
+    [cards this]
+  ::  the host sets the mint: url, active keyset, largest denomination, fees
+      %noun
+    ?>  =(src.bowl our.bowl)
+    =+  !<([url=@t kid=@t top=@ud fee=(map @t @ud)] vase)
+    `this(mint-url.state url, keyset-id.state kid, top-denom.state top, fees.state fee)
+  ::  anything you gate
+      %some-gated-action
+    ?>  (is-whitelisted:hc src.bowl)
+    `this
   ==
-```
-
-**Option B: Single output (simpler, less spec-correct)**
-
-If you don't care about receiving usable tokens back (verify-and-discard), use a single output for the full amount. This is simpler but only works if the total matches a denomination the mint supports:
-
-```hoon
-=/  [b-hex=@t secret=@t r=@]  (make-output total keyset-id eny.bowl)
-```
-
-The standard approach is Option A with `split-amount` — it works for any total.
-
-### Step 4: Make the iris HTTP request
-
-Send the swap request to the mint:
-
-```hoon
-++  verify-payment
-  |=  [proofs=(list json) total=@ud eyre-id=@ta who=@p]
-  ^-  (list card)
-  =/  swap-body=json  (build-swap-request proofs total)
-  =/  body-octs=octs  (as-octs:mimes:html (en:json:html swap-body))
-  =/  mint-url=@t  'http://localhost:8080/v1/swap'
-  =/  wire-id=@ta  (scot %uv (sham (add eny.bowl now.bowl)))
-  =/  =request:http
-    :*  method=%'POST'
-        url=mint-url
-        header-list=['content-type' 'application/json']~
-        body=`body-octs
-    ==
-  :~  [%pass /payment/[wire-id] %arvo %i %request request *outbound-config:iris]
-  ==
-```
-
-Store the pending verification in state so you can match the response:
-
-```hoon
-+$  pending-payment
-  $:  who=@p
-      amount=@ud
-      eyre-id=@ta           ::  if you need to respond to the user
-  ==
-```
-
-### Step 5: Handle the iris response
-
-In your `on-arvo` arm, handle the mint's response:
-
-```hoon
+++  on-watch  on-watch:def
+++  on-leave  on-leave:def
+++  on-peek   on-peek:def
+++  on-agent  on-agent:def
 ++  on-arvo
   |=  [=wire =sign-arvo]
   ^-  (quip card _this)
   ?+  wire  (on-arvo:def wire sign-arvo)
       [%payment @ta ~]
-    ?>  ?=(%iris -.sign-arvo)
-    ?>  ?=(%http-response +<.sign-arvo)
-    =/  wire-id=@ta  i.t.wire
-    ::  Look up pending payment by wire-id
-    =/  pend  (~(get by pending-payments.state) wire-id)
-    ?~  pend
-      ~&  >>>  [%unknown-payment-response wire-id]
-      `this
-    ::  Parse response
-    =/  resp  client-response.sign-arvo
-    ?.  ?=(%finished -.resp)
-      `this
-    =/  status  status-code.response-header.resp
-    ?.  =(200 status)
-      ::  Swap failed — tokens are invalid, already spent, or amounts don't balance
-      ~&  >>>  [%payment-rejected who.u.pend status]
-      =.  pending-payments.state  (~(del by pending-payments.state) wire-id)
-      ::  Notify user of failure here
-      `this
-    ::  Swap succeeded — payment is verified!
-    ~&  >  [%payment-accepted who.u.pend amount.u.pend]
-    =/  expiry=@da  (add now.bowl (mul ~d30 1))  ::  30-day access
-    =/  record=payment-record
-      [who=who.u.pend amount=amount.u.pend expiry=expiry]
-    =.  whitelist.state  (~(put by whitelist.state) who.u.pend record)
-    =.  pending-payments.state  (~(del by pending-payments.state) wire-id)
-    ::  Notify user of success here
-    `this
+    ?>  ?=([%iris %http-response *] sign-arvo)
+    =^  cards  state  (take-swap:hc i.t.wire client-response.sign-arvo)
+    [cards this]
   ==
-```
-
-### Step 6: Check whitelist on gated operations
-
-```hoon
-++  is-whitelisted
-  |=  who=@p
-  ^-  ?
-  =/  record  (~(get by whitelist.state) who)
-  ?~  record  %.n
-  (gth expiry.u.record now.bowl)
-```
-
-Use it to gate pokes, scries, or subscriptions:
-
-```hoon
-++  on-poke
-  |=  [=mark =vase]
-  ^-  (quip card _this)
-  ?+  mark  (on-poke:def mark vase)
-      %some-gated-action
-    ?.  (is-whitelisted src.bowl)
-      ~|  %payment-required
-      !!
-    ::  ... handle the action
-  ==
-```
-
----
-
-## Complete poke handler example
-
-Here's a full payment poke handler that receives tokens via JSON:
-
-```hoon
-++  handle-payment-poke
-  |=  [jon=json who=@p]
-  ^-  (quip card _this)
-  ?.  ?=([%o *] jon)
-    `this
-  =/  maybe-proofs  (~(get by p.jon) 'proofs')
-  ?~  maybe-proofs
-    ~&  >>>  %missing-proofs
-    `this
-  ?.  ?=([%a *] u.maybe-proofs)
-    `this
-  =/  proofs=(list json)  p.u.maybe-proofs
-  ::  Sum up the token amounts
-  =/  total=@ud
+++  on-fail  on-fail:def
+--
+|%
+++  pay
+  |_  [=bowl:gall st=state-0]
+  ::
+  ::  take-payment: swap the payer's proofs at the mint; the payer is
+  ::  credited when the mint answers (take-swap)
+  ++  take-payment
+    |=  proofs=(list json)
+    ^-  (quip card state-0)
+    =/  total=@ud  (proofs-total proofs)
+    =/  fee=@ud  (input-fee proofs)
+    ::  the mint takes at most 100 proofs; ask for at least 100 sats net
+    ?:  |((gth (lent proofs) 100) (lth total (add fee 100)))
+      ~&  >>>  [%payment-refused total fee]
+      `st
+    =/  amount=@ud  (sub total fee)
+    =/  wire-id=@ta  (scot %uv (sham eny.bowl))
+    =.  pending-payments.st  (~(put by pending-payments.st) wire-id [src.bowl amount])
+    =/  req=request:http  (swap-request proofs amount)
+    :_  st
+    [%pass /payment/[wire-id] %arvo %i %request req *outbound-config:iris]~
+  ::
+  ::  proofs-total: the sum of the proofs' amounts
+  ++  proofs-total
+    |=  proofs=(list json)
+    ^-  @ud
     %+  roll  proofs
-    |=  [tok=json acc=@ud]
-    ?.  ?=([%o *] tok)  acc
-    =/  amt-val  (~(get by p.tok) 'amount')
-    ?~  amt-val  acc
-    ?+  -.u.amt-val  acc
-      %n  (add acc (rash p.u.amt-val dem:ag))
+    |=  [j=json acc=@ud]
+    ?.  ?=([%o *] j)  acc
+    =/  a  (~(get by p.j) 'amount')
+    ?.  ?=([~ %n *] a)  acc
+    (add acc (fall (rush p.u.a (bass 10 (plus dit))) 0))
+  ::
+  ::  input-fee: ceil(sum of each proof's keyset input_fee_ppk / 1000)
+  ++  input-fee
+    |=  proofs=(list json)
+    ^-  @ud
+    =/  ppk=@ud
+      %+  roll  proofs
+      |=  [j=json acc=@ud]
+      ?.  ?=([%o *] j)  acc
+      =/  id  (~(get by p.j) 'id')
+      ?.  ?=([~ %s *] id)  acc
+      (add acc (~(gut by fees.st) p.u.id 0))
+    (div (add ppk 999) 1.000)
+  ::
+  ::  split-to: an amount as powers of two, none above top-denom
+  ++  split-to
+    |=  amount=@ud
+    ^-  (list @ud)
+    %+  weld  (reap (div amount top-denom.st) top-denom.st)
+    (split-amount (mod amount top-denom.st))
+  ::
+  ::  swap-request: POST /v1/swap trading the proofs for new outputs worth
+  ::  amount. The outputs' secrets and blinding factors are dropped, so
+  ::  this burns the value (see "Keeping the tokens" to hold it).
+  ++  swap-request
+    |=  [proofs=(list json) amount=@ud]
+    ^-  request:http
+    =/  outputs=(list json)
+      =/  denoms=(list @ud)  (split-to amount)
+      =|  idx=@ud
+      =|  acc=(list json)
+      |-  ^-  (list json)
+      ?~  denoms  (flop acc)
+      =/  out  (make-output i.denoms keyset-id.st (shax (add eny.bowl idx)))
+      =/  o=json
+        %-  pairs:enjs:format
+        :~  ['amount' (numb:enjs:format i.denoms)]
+            ['id' s+keyset-id.st]
+            ['B_' s+b-hex.out]
+        ==
+      $(denoms t.denoms, idx +(idx), acc [o acc])
+    =/  body=json
+      (pairs:enjs:format ~[['inputs' a+proofs] ['outputs' a+outputs]])
+    :*  %'POST'
+        (cat 3 mint-url.st '/v1/swap')
+        ['content-type' 'application/json']~
+        `(as-octs:mimes:html (en:json:html body))
     ==
-  ::  Require minimum payment
-  ?.  (gte total 100)                      ::  100 sats minimum
-    ~&  >>>  [%insufficient-payment total]
-    `this
-  ::  Build swap request and send to mint
-  =/  swap-body=json  (build-swap-request proofs total)
-  =/  body-octs=octs  (as-octs:mimes:html (en:json:html swap-body))
-  =/  wire-id=@ta  (scot %uv (sham (add eny.bowl now.bowl)))
-  =.  pending-payments.state
-    (~(put by pending-payments.state) wire-id [who total])
-  :_  this
-  :~  :*  %pass
-          /payment/[wire-id]
-          %arvo  %i  %request
-          :*  method=%'POST'
-              url='http://localhost:8080/v1/swap'
-              header-list=['content-type' 'application/json']~
-              body=`body-octs
-          ==
-          *outbound-config:iris
-      ==
-  ==
+  ::
+  ::  take-swap: the mint's answer. 200 means it took the proofs.
+  ++  take-swap
+    |=  [wire-id=@ta res=client-response:iris]
+    ^-  (quip card state-0)
+    =/  pend  (~(get by pending-payments.st) wire-id)
+    ?~  pend  `st
+    ::  more of the answer is coming
+    ?:  ?=(%progress -.res)  `st
+    =.  pending-payments.st  (~(del by pending-payments.st) wire-id)
+    ::  cancelled: the swap may or may not have happened (see below)
+    ?.  ?=(%finished -.res)
+      ~&  >>>  [%payment-unknown who.u.pend]
+      `st
+    =/  status=@ud  status-code.response-header.res
+    ?.  =(200 status)
+      ~&  >>>  [%payment-rejected who.u.pend status]
+      `st
+    ::  extend from the current expiry, not from now
+    =/  old  (~(get by whitelist.st) who.u.pend)
+    =/  from=@da  ?~(old now.bowl (max now.bowl expiry.u.old))
+    =/  until=@da  (add from (access-duration amount.u.pend))
+    =.  whitelist.st  (~(put by whitelist.st) who.u.pend [amount.u.pend until])
+    `st
+  ::
+  ::  access-duration: what an amount buys
+  ++  access-duration
+    |=  amount=@ud
+    ^-  @dr
+    ?:  (gte amount 1.000)  ~d365
+    ?:  (gte amount 500)  ~d180
+    ~d30
+  ::
+  ++  is-whitelisted
+    |=  who=@p
+    ^-  ?
+    =/  rec  (~(get by whitelist.st) who)
+    ?~  rec  %.n
+    (gth expiry.u.rec now.bowl)
+  --
+--
 ```
 
----
-
-## Mint API reference
-
-These are the mint endpoints your app will use. All are unauthenticated HTTP JSON APIs.
-
-### POST /v1/swap — Verify and redeem tokens
-
-This is the primary endpoint your app uses. It atomically verifies input tokens and issues new output tokens.
-
-**Request:**
-```json
-{
-  "inputs": [
-    {"C": "02...", "secret": "...", "amount": 4, "id": "01..."},
-    {"C": "02...", "secret": "...", "amount": 1, "id": "01..."}
-  ],
-  "outputs": [
-    {"B_": "02...", "amount": 5}
-  ]
-}
-```
-
-**Rules:**
-- `sum(input amounts) - fee == sum(output amounts)`
-- Fee is computed from `input_fee_ppk` of each input's keyset: `ceil(sum(ppk) / 1000)`
-- Every input must have a valid signature and unspent secret
-- Every output must reference a valid, active keyset and denomination
-
-**Success (200):**
-```json
-{
-  "signatures": [
-    {"C_": "02...", "amount": 5, "id": "01...", "dleq": {"e": "...", "s": "..."}}
-  ]
-}
-```
-
-**Failure (400):**
-```json
-{"detail": "token-already-spent"}
-```
-
-Possible errors: `token-already-spent`, `invalid-token-signature`, `unknown-keyset`, `unknown-denomination`, `amounts-do-not-balance`, `missing-inputs`, `missing-outputs`.
-
-### GET /v1/keys — Get mint's active public keys
-
-Needed to construct blinded output messages.
-
-**Response:**
-```json
-{
-  "keysets": [{
-    "id": "01abc...",
-    "unit": "sat",
-    "active": true,
-    "input_fee_ppk": 0,
-    "keys": {
-      "1": "02...", "2": "02...", "4": "02...", "8": "02...",
-      "16": "02...", "32": "02...", "64": "02...", "128": "02...",
-      "256": "02...", "512": "02..."
-    }
-  }]
-}
-```
-
-### POST /v1/checkstate — Check if tokens are spent
-
-Read-only check. Does NOT mark as spent. Useful for checking token validity without consuming them, but **does not prevent double-spend** — another party could spend the token between your check and your swap.
-
-**Request:**
-```json
-{"Ys": ["02...", "02..."]}
-```
-
-Where each Y is `hashToCurve(secret)` as a compressed hex point.
-
-**Response:**
-```json
-{
-  "states": [
-    {"Y": "02...", "state": "UNSPENT"},
-    {"Y": "02...", "state": "SPENT"}
-  ]
-}
-```
-
-### GET /v1/info — Mint capabilities
-
-```json
-{
-  "name": "~zod ecash",
-  "version": "ecash/0.2.0",
-  "nuts": {
-    "1": {"methods": [{"method": "bolt11", "unit": "sat"}, {"method": "self", "unit": "sat"}]},
-    "4": {"methods": [...]},
-    "5": {"methods": [...]},
-    ...
-  }
-}
-```
-
----
-
-## Patterns
-
-### Subscription tiers
-
-Different payment amounts grant different access durations or levels:
-
-```hoon
-++  access-duration
-  |=  amount=@ud
-  ^-  @dr
-  ?:  (gte amount 1.000)  ~d365    ::  1000+ sats = 1 year
-  ?:  (gte amount 500)    ~d180    ::  500+ sats = 6 months
-  ?:  (gte amount 100)    ~d30     ::  100+ sats = 30 days
-  ~d7                               ::  any amount = 7 days
-```
-
-### Extending existing access
-
-When a user pays again while already whitelisted, extend from their current expiry rather than from now:
-
-```hoon
-=/  current-expiry=@da
-  =/  existing  (~(get by whitelist.state) who)
-  ?~  existing  now.bowl
-  (max now.bowl expiry.u.existing)
-=/  new-expiry=@da
-  (add current-expiry (access-duration amount))
-```
-
-### Periodic whitelist cleanup
-
-Use a timer to prune expired entries:
-
-```hoon
-::  In on-init or on-load, set a daily timer:
-[%pass /cleanup %arvo %b %wait (add now.bowl ~d1)]
-
-::  In on-arvo, handle the timer:
-    [%cleanup ~]
-  ?>  ?=(%behn -.sign-arvo)
-  =.  whitelist.state
-    %-  ~(rep by whitelist.state)
-    |=  [[who=@p rec=payment-record] acc=(map @p payment-record)]
-    ?:  (gth expiry.rec now.bowl)
-      (~(put by acc) who rec)
-    acc
-  :_  this
-  :~  [%pass /cleanup %arvo %b %wait (add now.bowl ~d1)]
-  ==
-```
-
-### Multi-mint support
-
-Accept tokens from multiple mints by trying each:
-
-```hoon
-+$  mint-config  [url=@t name=@t]
-
-++  known-mints
-  ^-  (list mint-config)
-  :~  ['http://localhost:8080' 'local']
-      ['https://mint.example.com' 'remote']
-  ==
-```
-
-The keyset ID in each token tells you which mint issued it. Maintain a mapping of keyset ID to mint URL, populated by fetching `/v1/keysets` from each mint at startup.
-
-### Without BDHKE (simplified verify-and-burn)
-
-If your app doesn't need to hold tokens and you don't want to import the BDHKE library, you can use a workaround: swap the user's tokens for tokens locked to a random P2PK key that nobody holds. This effectively burns them while satisfying the swap balance requirement.
-
-```hoon
-::  Generate throwaway output — no one can spend it
-=/  rand-secret=@t
-  (crip (weld "burn-" (trip (scot %uv (sham eny.bowl)))))
-```
-
-You still need to compute `B_` (a blinded message), which requires `hash-to-curve` and point multiplication. So in practice, importing `bdhke` is the cleanest path.
-
-### Accepting tokens via HTTP
-
-If your app has an HTTP endpoint (bound via Eyre), you can accept payments as JSON POST bodies. This is convenient for web frontends:
+Set the mint from the dojo (values from `GET /v1/keys` and `GET /v1/keysets`):
 
 ```
-POST /apps/your-app/pay
-Content-Type: application/json
-Cookie: urbauth-~zod=...
-
-{
-  "proofs": [
-    {"C": "02...", "secret": "...", "amount": 4, "id": "01..."}
-  ]
-}
+:paywall ['http://localhost:8080' '01ab…' 1.048.576 (my ~[['01ab…' 0]])]
 ```
 
-### Accepting tokens via poke
+When the mint rotates keys, swaps fail with `inactive-keyset` or `unknown-keyset`: fetch the
+keysets again and re-set. A proof from a keyset missing from `fees` is counted at fee 0; if that
+keyset charges a fee, the swap fails with `amounts-do-not-balance`.
 
-For ship-to-ship payments, define a mark and accept pokes:
+**A lost answer.** If iris gives `%cancel`, or the ship restarts before the answer, the mint may
+have swapped the proofs anyway. Check one of them: `POST /v1/checkstate` with
+`Y = (pt-to-hex (hash-to-curve secret))`; `SPENT` means the swap went through.
+
+### The poke mark
+
+`mar/ecash-payment.hoon`: a list of proofs, from a noun or from JSON `{"proofs": [...]}`.
 
 ```hoon
 ::  mar/ecash-payment.hoon
-|_  payment=[proofs=(list json)]
+|_  proofs=(list json)
 ++  grab
   |%
-  ++  noun  ecash-payment
+  ++  noun  (list ^json)
   ++  json
     |=  jon=^json
-    ?.  ?=([%o *] jon)  *ecash-payment
-    =/  proofs  (~(get by p.jon) 'proofs')
-    ?~  proofs  *ecash-payment
-    ?.  ?=([%a *] u.proofs)  *ecash-payment
-    [p.u.proofs]
+    ^-  (list ^json)
+    ?.  ?=([%o *] jon)  ~
+    =/  v  (~(get by p.jon) 'proofs')
+    ?.  ?=([~ %a *] v)  ~
+    p.u.v
   --
 ++  grow
   |%
-  ++  noun  payment
+  ++  noun  proofs
   --
 ++  grad  %noun
 --
 ```
 
+Inside `grab`, `json` is the arm, so the type is written `^json`.
+
+### Keeping the tokens
+
+To hold the value instead of burning it, keep each output's whole `make-output` result, then
+unblind the mint's signature:
+
+```hoon
+::  keep all of out: [b-hex=@t secret=@t blinding-factor=@]
+=/  out  (make-output 64 keyset-id.st (shax eny.bowl))
+::
+::  the mint returned {C_, amount, id, dleq: {e, s}} for it; k-hex is
+::  the mint's public key for 64 in that keyset (GET /v1/keys)
+=/  c-  (need (hex-to-pt c-hex))
+=/  k   (need (hex-to-pt k-hex))
+?>  (dleq-verify (need (hex-to-pt b-hex.out)) c- k (hex-decode e-hex) (hex-decode s-hex))
+=/  c=@t  (pt-to-hex (unblind-signature c- blinding-factor.out k))
+::  the new proof: {"amount": 64, "id": <id>, "secret": secret.out, "C": c}
+```
+
+The outputs and signatures come back in the same order.
+
+---
+
+## Mint API reference
+
+All public JSON over HTTP. Errors are `{"detail": "<code>"}` with a 4xx/5xx status.
+
+### POST /v1/swap
+
+**Request:**
+```json
+{
+  "inputs": [
+    {"amount": 4, "id": "01…", "secret": "…", "C": "02…"},
+    {"amount": 1, "id": "01…", "secret": "…", "C": "02…"}
+  ],
+  "outputs": [
+    {"amount": 4, "id": "01…", "B_": "02…"},
+    {"amount": 1, "id": "01…", "B_": "03…"}
+  ]
+}
+```
+
+**Rules:**
+- `sum(inputs) − fee == sum(outputs)`, fee as above.
+- Every output amount is a denomination of the active keyset, and names that keyset.
+- At most 100 inputs and 100 outputs.
+- All or nothing: if any output can't be signed or any input fails, nothing is spent.
+
+**200:**
+```json
+{"signatures": [{"C_": "02…", "amount": 4, "id": "01…", "dleq": {"e": "…", "s": "…"}}, …]}
+```
+
+**400 codes:** `amounts-do-not-balance`, `fee-exceeds-inputs`, `token-already-spent`,
+`invalid-token-signature`, `invalid-C-point`, `secret-too-long`, `unknown-keyset`,
+`inactive-keyset`, `unknown-denomination`, `duplicate-output`, `output-already-signed`,
+`invalid-B_-point`, `missing-B_`, `batch-too-large`, `missing-inputs`, `missing-outputs`, and
+for P2PK-locked inputs `missing-witness-signatures`, `insufficient-p2pk-signatures`,
+`unsupported-spending-condition`.
+
+### GET /v1/keys
+
+The active keyset. Take `id` for your outputs and the largest key as `top-denom`.
+
+```json
+{"keysets": [{
+  "id": "01…", "unit": "sat", "active": true, "input_fee_ppk": 0,
+  "keys": {"1": "02…", "2": "03…", "4": "02…", "…": "…", "1048576": "02…"}
+}]}
+```
+
+A keyset made on an older `%ecash` mint stops at `"512"`.
+
+### GET /v1/keysets
+
+Every keyset, active or not, without keys: fill `fees` from it.
+
+```json
+{"keysets": [{"id": "01…", "unit": "sat", "active": true, "input_fee_ppk": 0}, …]}
+```
+
+### POST /v1/checkstate
+
+Read-only; it does **not** reserve anything.
+
+```json
+{"Ys": ["02…", "03…"]}
+→ {"states": [{"Y": "02…", "state": "UNSPENT", "witness": null},
+              {"Y": "03…", "state": "SPENT", "witness": null}]}
+```
+
+`PENDING` means the proof is in a Lightning payment still in flight; it may come back.
+
+### GET /v1/info
+
+```json
+{
+  "name": "ecash-mint",
+  "version": "ecash/1.0.0",
+  "description": "Cashu ecash mint on Urbit",
+  "nuts": {
+    "4": {"methods": [{"method": "bolt11", "unit": "sat", "min_amount": 1, "max_amount": 83886080}],
+          "disabled": false},
+    "5": {"methods": [{"method": "bolt11", "unit": "sat", "min_amount": 1}],
+          "disabled": false},
+    "7": {"supported": true},
+    "…": "nuts 3 to 12"
+  }
+}
+```
+
+`max_amount` is the most one mint quote can be; melts name no maximum.
+
+### Limits at the %ecash mint
+
+- 100 inputs, outputs or `Ys` per request; request bodies up to 1 MiB.
+- Secrets up to 2048 bytes (`make-output` makes 64).
+- P2PK: only `SIG_INPUTS`. A lock whose `data` key plus `pubkeys` number more than 10 can never
+  be spent by those keys (the same for more than 10 `refund` keys), and a witness with more than
+  10 signatures is refused.
+
+---
+
+## Patterns
+
+### Multiple mints
+
+Keep a mint URL per keyset id, filled from each mint's `GET /v1/keysets`, and send each payment's
+swap to the mint that issued its keyset. Proofs from different mints can't share one swap.
+
+### Accepting tokens over HTTP
+
+Bind a path with eyre and read the same `{"proofs": [...]}` body. A public caller has no ship
+identity you can trust, so key the whitelist on something the caller proves (a session or
+account you issue), not on `src.bowl`.
+
+### Access tokens instead of sats (`%ecash-services`)
+
+If you gate access with zero-value service tokens rather than payments, redeem them with
+`POST /services/v1/{name}/redeem`. **Grant access only when a token's `status` is `"fresh"`.**
+The endpoint answers 200 with `"replay"` for a token that was already redeemed, possibly by
+someone else.
+
 ---
 
 ## Checklist
 
-When integrating ecash payments into your Gall agent:
-
-- [ ] Add `whitelist=(map @p payment-record)` to state
-- [ ] Add `pending-payments=(map @ta pending-payment)` to state
-- [ ] Import `/+  *bdhke` for `hash-to-curve` and point operations
-- [ ] Add a poke handler that accepts tokens (via JSON or custom mark)
-- [ ] Sum input token amounts and enforce a minimum
-- [ ] Build a swap request with proper blinded outputs
-- [ ] Send the swap via iris to the mint's `/v1/swap`
-- [ ] Handle the iris response in `on-arvo` — 200 = valid, else rejected
-- [ ] On success, add the payer to the whitelist with an expiry
-- [ ] Gate protected operations with a whitelist check
-- [ ] Set up periodic cleanup of expired whitelist entries
-- [ ] Handle the case where a user pays again (extend, don't overwrite)
+- [ ] Copy `lib/curve.hoon` and `lib/bdhke.hoon`; import `/+  *curve, *bdhke`
+- [ ] State: `whitelist`, `pending-payments`, and the mint's url, keyset id, top denomination and fees
+- [ ] A poke (mark `%ecash-payment`) that takes proofs
+- [ ] Sum the proofs, subtract the input fee, enforce a minimum
+- [ ] Outputs: powers of two no larger than the top denomination, worth exactly `total − fee`
+- [ ] Send the swap with iris; on 200 credit the payer, otherwise don't
+- [ ] On `%cancel`, check `/v1/checkstate` before telling the payer it failed
+- [ ] Extend an existing whitelist entry from its current expiry
+- [ ] Gate protected pokes with `is-whitelisted`
+- [ ] Re-fetch keysets when swaps fail `inactive-keyset` or `unknown-keyset`

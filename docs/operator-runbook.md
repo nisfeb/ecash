@@ -1,14 +1,12 @@
-# Operator Runbook — %ecash mint
+# Operator Runbook: %ecash mint
 
-Practical operations for running the Urbit Cashu mint: the **`%ecash`** value
-mint plus the **`%ecash-services`** zero-value access-control agent. Reflects the
-current security model (verified against the source at state-13 / services
-state-0). Pairs with the design specs in `docs/design/specs/`.
+Operating the Urbit Cashu mint: the **`%ecash`** value mint and the **`%ecash-services`**
+zero-value access agent. Written against the source at `%ecash` state 15 and `%ecash-services`
+state 1.
 
-> This mint handles real value. Read §3 (melt safety model) and §10 (backup &
-> DR) before you point it at a funded Lightning node. The single most dangerous
-> operator action is a **force-abort** of a melt that later settles (§4, §15) —
-> it double-pays.
+> This mint handles real value. Read §3 (melt safety) and §10 (backup) before you point it at a
+> funded Lightning wallet. The most dangerous operator action is a **force-abort** of a melt
+> that actually settled (§4, §15): the mint pays twice.
 
 **Contents**
 
@@ -16,539 +14,521 @@ state-0). Pairs with the design specs in `docs/design/specs/`.
 2. Pre-production checklist
 3. The melt safety model
 4. Handling a stuck `PENDING` melt
-5. Lightning-backend-down playbook
-6. Admin endpoints (full reference)
-7. Public API surface (reference)
-8. Keyset management & rotation
-9. Settings & economic tuning
-10. Backup & disaster recovery
-11. Upgrade & state migration
-12. Monitoring, alerting & solvency
-13. Capacity, abuse & rate limiting
-14. Incident response: key / pier compromise
+5. Lightning backend down; LND caveats
+6. Admin endpoints
+7. Public API surface
+8. Keyset management and rotation
+9. Settings and limits
+10. Backup and disaster recovery
+11. Upgrade and state migration
+12. Monitoring and solvency
+13. Capacity, abuse and rate limiting
+14. Incident response: key or pier compromise
 15. Incident response: confirmed double-pay
 16. Maintenance
-17. Security posture & residual operator responsibility
-18. Appendix: install, tests, known quirks
+17. Security posture and residual risk
+18. Appendix: install, tests, quirks
 
 ---
 
 ## 1. Architecture at a glance
 
-- **`%ecash`** — the value mint. Serves the Cashu protocol at two Eyre bindings:
-  the standard `/v1/*` and a legacy `/apps/ecash/*` alias. Public, unauthenticated
-  by protocol design: `/v1/keys`, `/v1/keys/{id}`, `/v1/keysets`, `/v1/info`,
-  `/v1/swap`, `/v1/mint/quote/{method}`, `/v1/mint/{method}`,
-  `/v1/melt/quote/bolt11`, `/v1/melt/bolt11`, `/v1/checkstate`. Admin (cookie +
-  CSRF gated) at `/apps/ecash/admin` and `/apps/ecash/admin/api/*`.
-- **`%ecash-services`** — zero-value credentials/access control. Public `/cred/*`
-  (anonymous blind-signed credentials) and `/services/{name}/*` (allowlist- and
-  cap-gated service tokens). Admin at `/apps/ecash-services/admin/api/*`.
-- Shared crypto (`lib/curve.hoon`, `lib/bdhke.hoon`) lives in `desk/lib` and is
-  copied into `desk-services/lib` by `make sync-libs` at build time — **edit it in
-  one place.** The `desk-services` copies are gitignored.
-- The supported mint/melt methods are **`bolt11`** (real Lightning) and
-  **`self`** (no-payment, testing only — see §2/§9).
+- **`%ecash`**, the value mint. Public Cashu API at `/v1/*` (keys, keysets, info, swap, mint,
+  melt, checkstate, restore). A few legacy public GETs under `/apps/ecash`: `/apps/ecash`
+  (status), `/apps/ecash/keysets`, `/apps/ecash/keysets/active`, `/apps/ecash/info`,
+  `/apps/ecash/icon`. Admin at `/apps/ecash/admin` (dashboard) and `/apps/ecash/admin/api/*`.
+- **`%ecash-services`**, zero-value credentials and access control. Public `/cred/v1/*` and
+  `/services/v1/*`; admin at `/apps/ecash-services/admin` and `/apps/ecash-services/admin/api/*`.
+- Shared libraries (`curve`, `bdhke`, `ecash-http`) live in `desk/lib`. `build.sh` (or
+  `make sync-libs`) copies them into `desk-services/lib`, where they are gitignored. **Edit them
+  in `desk/lib` only.** The mint's rules are in `desk/lib/ecash-rules.hoon`.
+- Mint/melt methods: **`bolt11`** (Lightning) and **`self`** (no payment; test mints only, §2).
 
-**Auth model.** Admin = the ship's own login session only (Eyre marks
-`authenticated` true exclusively for an `%ours` session; no foreign `@p` is ever
-exposed to the handler, so the boolean alone proves it is your ship). A
-missing-session admin request gets `401 {"detail":"unauthorized"}`.
-State-changing admin POSTs additionally require a same-origin **Origin/Referer**
-(CSRF): a *mismatched* Origin is rejected `403 {"detail":"forbidden-cross-origin"}`;
-a *missing* Origin **and** Referer is allowed (treated as a non-browser client).
-So non-browser tooling (curl/scripts) either sends `-H 'origin: https://<your-ship-host>'`
-or sends neither header. **The real perimeter is the session cookie** — CSRF adds
-nothing against a scripted attacker who already has it. There are no IP allowlists
-or host locks; put a reverse proxy in front if you need network-layer controls
-(§13).
+**Auth.** Admin routes need your ship's own login session (eyre marks a request
+`authenticated` only for your ship): otherwise `401 {"detail":"unauthorized"}`. A
+state-changing admin request that sends `Origin` (or else `Referer`) must name the host in
+`Host`, else `403 forbidden-cross-origin` (`X-Forwarded-Host` is not trusted); one that sends neither (curl,
+scripts) passes. **Behind a proxy, forward `Host`** (nginx: `proxy_set_header Host $host`) or
+dashboard saves will fail. The real perimeter is the session cookie.
 
-All HTTP responses carry hardening headers: `content-security-policy: default-src
-'self'; frame-ancestors 'none'`, `x-frame-options: DENY`,
-`x-content-type-options: nosniff`. Errors are always `{"detail":"<msg>"}`;
-success bodies are HTTP 200 with the real outcome in the JSON (including melt
-`abort` results — read the `result` field, not the status code).
+**Headers.** Every response carries `x-frame-options: DENY`, `x-content-type-options: nosniff`,
+`cache-control: no-store` and `Access-Control-Allow-Origin: *`, and a CSP
+(`default-src 'self'; frame-ancestors 'none'`; the dashboards get one that runs only their own
+nonce'd script and sets `form-action 'none'`). The public routes answer CORS preflight
+(`OPTIONS`), so don't add CORS headers at the proxy.
+
+Errors are `{"detail":"<code>"}` with a 4xx/5xx status. Admin actions answer 200 with the
+outcome in the JSON (for `/melt/abort`, read `result`).
 
 ---
 
 ## 2. Pre-production checklist
 
-1. **Start on a fresh keyset.** The mint auto-generates one on install (10
-   power-of-2 denominations 1..512, `input_fee_ppk` 0, active). The private keys
-   are derived from entropy at install time and live **only** in agent state —
-   treat the pier as money-bearing. If a denomination key ever leaks, the leaked
-   keyset stays usable to forge tokens *under that keyset id* (verify accepts any
-   keyset a token names), so the only true remedy is to **never reuse a pier whose
-   keys were exposed** (§14). Generate + activate a clean keyset before taking real
-   value if there is any doubt about the install entropy.
+1. **Start on a fresh keyset.** Install generates one: 21 denominations (2^0..2^20),
+   `input_fee_ppk` 0, active. Its private keys live only in agent state, so the pier is
+   money-bearing. A leaked key can forge tokens under that keyset id forever (any keyset in
+   state verifies), so the only remedy for exposed keys is a new pier (§14).
 
-2. **Configure the Lightning backend before taking bolt11 traffic.** A fresh
-   install defaults `ln-config` to `%none`, so bolt11 mint/melt are inert and
-   `/v1/info` omits the bolt11 method until you configure one. When ready, run
-   `POST /apps/ecash/admin/api/lightning/configure` with a real
-   `{type:"lnbits",url,api_key}` / `{type:"lnd",url,macaroon}`; or leave
-   `{type:"none"}` to run credentials-only. Confirm the result with
-   `GET .../lightning`.
+2. **Configure Lightning before taking bolt11 traffic.** Until then `ln-config` is `none`,
+   bolt11 quotes are refused and `/v1/info` lists no bolt11. Configure
+   (`POST /apps/ecash/admin/api/lightning/configure`) with LNbits for real funds (§5 on LND),
+   then `POST .../lightning/test`: it calls the backend and reports `status`, `http_status` and,
+   for LNbits, `balance_msat`.
 
-3. **Leave `self_method_enabled` OFF.** The `self` method mints sats with **no
-   Lightning deposit** and melts with a fake preimage — it is a free-money switch
-   for testing only. It must stay `false` on a value mint, and must **never** be
-   flipped on to "work around" a down backend (§5). `POST .../settings
-   {self_method_enabled:false}`.
+3. **Leave `self_method_enabled` off.** `self` mints with no deposit and melts with a stand-in
+   preimage. **Never enable it on a mint with a real Lightning backend**: tokens minted for free
+   with `self` melt over bolt11 for real sats. Never turn it on to work around a down backend (§5).
 
-4. **Set sane fee / TTL.** `POST .../settings` with `fee_reserve_pct` (basis
-   `pct/10000`; default `100` = 1%), `fee_reserve_min` (sats floor; default `10`),
-   `quote_ttl_secs` (default `3600`). ⚠️ **The server does NOT bounds-check these**
-   — a direct call can set `quote_ttl_secs:0` (every quote expires instantly) or
-   `fee_reserve_pct:0`. The `>=60` floor exists only in the dashboard JS. Validate
-   your own values (§9).
+4. **Set fees and TTL** (§9). `fee_reserve_pct` is basis points (default 100 = 1%). The server
+   rejects non-integers and floors the TTL at 60 s, but accepts a zero reserve.
 
-5. **Use a least-privilege Lightning credential.** The api-key/macaroon is stored
-   in cleartext in agent state. Scope the macaroon to invoice + pay only (no
-   node-admin), so a pier compromise can't drain the node beyond payments (§14).
+5. **Least-privilege Lightning credential.** It is stored in cleartext in agent state. Use a
+   dedicated LNbits wallet holding only what the mint needs (or an LND macaroon limited to
+   invoices and payments, never admin).
 
-6. **Put a rate-limiting reverse proxy in front.** There is **no** in-code
-   throttle, no per-IP limit, no cap on open quotes or total liability (§13). The
-   `/v1/*` surface is fully public.
+6. **Rate-limiting reverse proxy in front** (§13, `INSTALL.md` §3). The mint has no rate limit
+   and its crypto is CPU-heavy.
 
-7. **Record a solvency baseline.** Note `total_issued_sats − total_redeemed_sats`
-   from `GET .../overview` against your Lightning balance, and decide your
-   reconciliation cadence (§12).
+7. **Record a solvency baseline:** `total_issued_sats − total_redeemed_sats` from
+   `GET .../overview` against your Lightning balance (§12).
 
-8. Confirm `GET /v1/info` and `GET /v1/keys` return `200` and advertise the
-   intended keyset + NUTs (1,2,3,4,5,6,7,8,10,11,12).
+8. **Check `GET /v1/info`:** nuts 3–12 present; nuts 4 and 5 list `bolt11` only (no `self`);
+   nut 4's `max_amount` is 83886080 on a current keyset (nut 5 names no maximum).
+
+9. **Never run the JS test suites, `demo.mjs` or `npm run bench` against this mint.** They
+   change settings (turning on `self`, changing fees, repointing Lightning).
 
 ---
 
-## 3. The melt safety model (read before operating bolt11 melts)
+## 3. The melt safety model
 
-A bolt11 melt is an **outbound** Lightning payment. The mint cannot always tell
-"failed" from "still in flight" from a backend API, so the design is
-**safety-first: it never un-spends a customer's proofs on ambiguous evidence.**
+A bolt11 melt is an outbound Lightning payment. The mint often can't tell "failed" from "still
+in flight", so it **never un-spends a customer's proofs on ambiguous evidence.**
 
-On `POST /v1/melt/bolt11`:
-- Inputs are marked **spent** and `total_redeemed_sats` incremented, the quote
-  goes **`PENDING`**, and the reconciliation record is stored **durably**
-  (`melt-inflight`, survives restart) — all **before** the pay is dispatched. The
-  dispatch's HTTP response is treated as *dispatch confirmation only*.
-- **Settle → `PAID`** only on positive proof: a 2xx response (incl. real LNbits
-  `201`) **and** a non-empty `payment_preimage` **and** no error field. Then the
-  NUT-08 change is signed **exactly once** and the inflight record cleared.
-- **Anything else** — non-2xx, empty body, timeout/runtime cancel, `paid:false`,
-  in-flight, `404`, or 2xx-without-preimage — leaves the quote **`PENDING`** and
-  replies NUT-05 `PENDING`. The mint does **not** roll back. The client should
-  **poll**, not re-submit (`POST` of a `%pending` quote is refused
-  `quote-pending`).
-- Polling `GET /v1/melt/quote/bolt11/{id}` re-checks Lightning and **auto-settles
-  to `PAID`** once the payment confirms (paid + preimage). The auto-poll
-  **auto-rolls-back only on an explicit LND `status=FAILED`**.
+On `POST /v1/melt/bolt11`, after every check passes:
+- The inputs are marked **spent**, `total_redeemed_sats` goes up, the quote goes **`PENDING`**,
+  and a durable `melt-inflight` record (spent secrets and Ys, input total, blank change outputs,
+  overpayment) is stored, all **before** the payment is sent.
+- The payment request's own answer then decides:
+  - **2xx with a non-empty preimage and no error field**: settled. The quote goes `PAID`, the
+    NUT-08 change is signed once, and the inflight record is dropped.
+  - **LNbits refused it outright**: a 4xx other than 408/429 whose body has an error
+    (`detail`/`error`) and names no payment (`payment_hash`/`checking_id`). No HTLC can exist,
+    so the mint rolls back automatically: inputs spendable again, `total_redeemed_sats`
+    reduced, quote `failed` (wallets see `UNPAID` and may retry).
+  - **Anything else** (5xx, timeout, cancelled request, 2xx without preimage): the quote stays
+    `PENDING` and the wallet gets `PENDING`. It should poll, not re-submit (`quote-pending`).
+- Each poll of a `PENDING` melt (`GET /v1/melt/quote/bolt11/{id}`) answers with the stored
+  state at once and asks Lightning in the background:
+  - LNbits `paid: true`, or LND `status: SUCCEEDED`: **settle**.
+  - LND `status: FAILED`: **roll back**.
+  - Anything else (404, `paid: false`, in flight): nothing changes.
+- While a melt is `PENDING`, `/v1/checkstate` reports its inputs as `PENDING`.
 
-Two consequences to internalize:
-- **LNbits has no automatic rollback path at all.** Confirmed-failure detection is
-  gated on an LND `FAILED` status; an LNbits backend has no equivalent the code
-  checks. A genuinely-failed LNbits payment will sit `PENDING` forever via
-  polling — it waits for an operator abort (§4).
-- This is the deliberate trade: **the mint never double-pays/double-spends, at the
-  cost of occasionally needing a manual abort.**
+So: **an LNbits payment that LNbits accepted and that later fails is never rolled back
+automatically.** It stays `PENDING` until you abort it (§4). This is the trade: the mint never
+pays twice, at the cost of the occasional manual abort.
 
-Money-math notes: melt requires `(input_total − input_fee) ≥ amount +
-fee_reserve` (else `400 insufficient-inputs`). Refund = `fee_reserve −
-actual_routing_fee`, and `routing-fee-sats` is **fail-closed** — a fee field it
-can't parse as a clean integer is treated as the full reserve, so refund rounds to
-**0** rather than ever over-refunding. A backend that reports fees in an
-unexpected field/encoding therefore silently overcharges the customer their whole
-reserve; verify your backend's fee fields against a real small melt.
-
----
-
-## 4. Handling a stuck `PENDING` melt (the core operator procedure)
-
-A quote stuck `PENDING` means: **inputs are spent**, the Lightning outcome is
-unconfirmed to the mint. **Do not delete it** (delete is refused for
-pending/inflight melts — `cannot-delete-pending-melt`). Resolve it:
-
-1. **Poll first:** `GET /v1/melt/quote/bolt11/{id}`. If the payment settled this
-   flips it to `PAID` and returns the change. Done.
-
-2. **If still `PENDING`, check your Lightning node directly** (LNbits dashboard /
-   `lncli listpayments` / `lncli trackpayment`). Determine the real outcome, then:
-
-   - **Settled on LN** → poll again, or
-     `POST /apps/ecash/admin/api/melt/abort {quote_id}` — abort re-checks LN and
-     **will never roll back a settled pay** (it returns
-     `result:"settled-not-aborted"` and settles instead).
-   - **Definitively failed, LND backend (`status=FAILED`)** →
-     `POST .../melt/abort {quote_id}` (no force). The mint sees the explicit
-     failure and rolls back: inputs become spendable again, `total_redeemed_sats`
-     decremented (underflow-guarded), quote `→ failed`. Result:
-     `aborted-confirmed-failed`.
-   - **LNbits, or LND can't prove failure (404 / `paid:false` / in-flight /
-     2xx-without-preimage)** → the default abort **refuses** with
-     `result:"in-flight-or-unconfirmed"`, leaving the quote `PENDING`. Only after
-     you have **confirmed out-of-band that the HTLC is dead/cancelled**, force it:
-     `POST .../melt/abort {quote_id, force:true}`. This un-spends the inputs.
-     ⚠️ **Forcing an abort on a payment that later settles double-pays you.** Even
-     under force, if the LN re-check shows settled the mint settles instead of
-     rolling back — but settle detection needs the preimage in the status
-     response; if your backend omits it, force *will* roll back a settled HTLC.
-     **Force is for confirmed-dead payments only.**
-
-3. **Legacy / restart-orphaned quotes** (no stored `melt-inflight`, e.g. created
-   before the inflight record existed or orphaned by a crash mid-flight): if abort
-   reports `no-inflight-record`, recover by supplying the original input
-   identifiers: `POST .../melt/abort {quote_id, force:true, secrets:[...],
-   ys:[...]}` — those exact inputs are un-spent (`redeemed_decremented:0` since the
-   counter linkage is gone). If you don't have them, the proofs can't be
-   auto-reclaimed; the quote can be force-failed to unstick it but those inputs
-   stay spent.
-
-**Abort `result` values:** `aborted-confirmed-failed` · `aborted-forced` ·
-`settled-not-aborted` · `in-flight-or-unconfirmed` · `no-op-not-pending` ·
-`no-inflight-record`. The response carries `{aborted:bool, result, ...}`;
-read `result`, not the (always-200) HTTP status. Note the abort runs
-**asynchronously** when it can re-check LN — the decision lands on the deferred
-LN response, not the initial call. There is **no dashboard button** for abort;
-call it by hand.
+**Money math.** A melt needs `(inputs − input_fee) ≥ amount + fee_reserve` (else
+`400 insufficient-inputs`), checked on the claimed amounts before any EC work. Change is
+`(fee_reserve − routing_fee) + overpayment`, where overpayment is whatever the inputs paid
+beyond `amount + fee_reserve + input_fee`. The routing fee is read **fail-closed**: sats from
+`fee_sat` or `payment_route.total_fees`, else msat (rounded up) from `total_fees_msat`,
+`payment_route.total_fees_msat`, `fee` or `details.fee`; LNbits' negative msat fee counts as its
+magnitude. A fee the mint can't read counts as the whole reserve, so the customer gets back only
+the overpayment. Check your backend's fee fields on a real small melt. Change is split into
+powers of two, largest first, onto the blank outputs the wallet sent; **what doesn't fit is
+kept by the mint.**
 
 ---
 
-## 5. Lightning-backend-down playbook
+## 4. Handling a stuck `PENDING` melt
 
-Distinguish two cases:
+A `PENDING` quote means the **inputs are spent** and the Lightning outcome is unknown to the
+mint. **Do not delete it** (refused: `cannot-delete-pending-melt`). Resolve it:
 
-- **Backend `%none`, or unreachable at quote-creation time.** New bolt11
-  mint/melt-quote requests fail fast (`400 no-lightning-backend-configured` for
-  `%none`, or an LN-layer error). No value is at risk; the mint is effectively
-  read-only for bolt11. Customers see quote-creation errors. Nothing to reconcile.
-- **Backend goes down *after* a melt was dispatched.** Those quotes sit `PENDING`
-  with inputs spent — exactly the §4 path. **They are safe**: the durable
-  `melt-inflight` record means they will reconcile on the next poll/abort once the
-  node returns. Do **not** delete them, do **not** restart-and-resubmit.
+1. **Poll:** `GET /v1/melt/quote/bolt11/{id}`, then again a few seconds later (the check runs
+   behind the first answer). If the payment settled, the quote is now `PAID` with its change.
 
-Do **NOT** enable `self_method` to "keep minting" during an outage — that creates
-unbacked tokens (instant inflation, §9/§14). The correct response to a node outage
-is to let bolt11 quote-creation fail, leave in-flight melts `PENDING`, and
-reconcile when the node is back.
+2. **Still `PENDING`: check your Lightning node yourself** (the LNbits wallet's payments, or
+   `lncli listpayments` / `lncli trackpayment`). Then abort from the dashboard (Quotes tab:
+   **Abort** / **Force abort** on a PENDING bolt11 melt) or with
+   `POST /apps/ecash/admin/api/melt/abort`. The mint re-checks Lightning first and answers once
+   the backend replies:
+
+   | Body | Lightning says | Outcome, `result` |
+   |---|---|---|
+   | `{quote_id}` | settled | settles the melt: `settled-not-aborted` |
+   | `{quote_id}` | LND `FAILED` | rolls back: `aborted-confirmed-failed` |
+   | `{quote_id}` | anything else | nothing changes: `in-flight-or-unconfirmed` |
+   | `{quote_id, force: true}` | settled | still settles: `settled-not-aborted` |
+   | `{quote_id, force: true}` | anything else | rolls back on your word: `aborted-forced` |
+   | either | (the quote was rolled back and melted again while the check was out) | nothing changes: `stale-attempt` |
+
+   Every Lightning request about a melt is tagged with the attempt it was made for, so a late
+   answer about an earlier attempt of the same quote can never roll back the one in flight.
+
+   "Settled" is LNbits `paid: true` (no preimage needed) or LND `SUCCEEDED`. A rollback makes
+   the inputs spendable again, reduces `total_redeemed_sats` (never below 0) and sets the quote
+   `failed`; the answer carries `unspent_secrets` and `redeemed_decremented`.
+
+   ⚠️ **Force only after your node shows the payment FAILED**, not merely "not settled". An
+   in-flight HTLC looks the same to the mint as a failed one; if it settles after a force, the
+   mint has paid twice (§15). With LND, the status lookup is unverified (§5): if it can't see a
+   settled payment, force rolls that back too.
+
+3. **Backend set to `none`.** With no backend to ask, abort can only take your word: without
+   `force` it changes nothing (`in-flight-or-unconfirmed`, `ln_checked: false`); with `force`
+   it rolls back at once (`aborted-forced`, `ln_checked: false`). A backend removed after the
+   pay went out says nothing about whether it settled, so reconnect it and abort normally
+   instead whenever you can.
+
+4. **No inflight record** (a melt older than those records): with `force: true`, name the melt's
+   inputs, `{quote_id, force: true, secrets: [...], ys: [...]}`. After the Lightning check those
+   exact secrets and Ys are un-spent (`redeemed_decremented: 0`: the counter can't be matched).
+   Naming nothing gives `no-inflight-record` and changes nothing; the quote just stays `PENDING`
+   (cleanup keeps it; it owes nothing more).
+
+Other answers: `no-op-not-pending` (the quote stopped being `PENDING` before Lightning answered),
+`400 quote-not-pending`, `404 quote-not-found`. The HTTP status is 200 for every `result`.
 
 ---
 
-## 6. Admin endpoints (full reference)
+## 5. Lightning backend down; LND caveats
 
-All require an `%ours` session cookie. POSTs additionally require same-origin
-Origin/Referer (or none). `%ecash` surface (`/apps/ecash/admin/api/...`):
+- **Backend `none`, or unreachable when a quote is made.** New bolt11 quotes fail:
+  `400 no-lightning-backend-configured`, or a 502 (`lightning-invoice-creation-failed`,
+  `lightning-decode-failed`, `lightning-request-cancelled`). A mint quote whose invoice couldn't
+  be made is deleted. No value is at risk.
+- **Backend down after a melt was sent.** Those quotes sit `PENDING` with inputs spent (§4).
+  They are safe: `melt-inflight` survives restarts, and they reconcile on the next poll or abort
+  once the backend is back. Don't delete them, don't force-abort them blind, and don't switch the
+  backend to `none` and abort (§4.3).
+- **Deposits during an outage.** A quote poll can't see a payment while the backend is down.
+  Cleanup keeps an expired unpaid bolt11 quote for 2 days and checks it on Lightning once, in its
+  first day past expiry; any wallet poll of the quote also re-checks it. If the backend was down
+  across a quote's expiry, look for payments to it on your node before the 2 days are up.
+- **Don't enable `self`** to keep minting during an outage: that creates unbacked tokens (§2.3).
 
-| Method · Path | Body | Effect / notes |
+**LND.** The code handles LND's REST conventions (int64 fields as strings, base64 `r_hash` and
+preimage), but **the LND path has never been tested against a real LND node**, and its
+payment-status lookup (`GET /v1/payment/{hash}`) is unverified. A melt whose payment answer
+carries a preimage settles at once; one left `PENDING` may never settle by polling, and then only
+`/melt/abort` resolves it (after you check the node yourself, §4). **Use LNbits for real funds.**
+
+---
+
+## 6. Admin endpoints
+
+Base `/apps/ecash/admin/api`. Session cookie required; POSTs also pass the same-origin check
+(§1).
+
+| Method · path | Body | Effect / notes |
 |---|---|---|
-| `GET /overview` | — | Liability + counts: `total_issued_sats`, `total_redeemed_sats`, mint/melt quote tallies, `ln_backend`. (Folds `%failed` quotes into the `unpaid` bucket; omits melt `issued`.) |
-| `GET /settings` · `POST /settings` | `{fee_reserve_pct?, fee_reserve_min?, quote_ttl_secs?, self_method_enabled?}` | Read / update economic + self-method settings. ⚠️ **No server-side bounds check** (§9). |
-| `GET /lightning` | — | `{type, configured, url, api_key_set}` — credential value is never exposed. |
-| `POST /lightning/configure` | `{type:"none"}` \| `{type:"lnbits",url,api_key}` \| `{type:"lnd",url,macaroon}` | Set backend (stores credential in state). |
-| `POST /lightning/test` | — | ⚠️ Reports config presence **only** — does **not** contact the node. A 200 here does not prove connectivity; verify with a small mint quote. |
-| `GET /keysets` · `GET /keysets/{id}` | — | List / detail (public keys only; privkeys never exposed). |
-| `POST /keysets/generate` | — | Create a **new inactive** keyset. Does not rotate. |
-| `POST /keysets/activate` | `{id}` | Rotate: activate target, demote previous active. |
-| `POST /keysets/deactivate` | `{id}` | Deactivate target; refuses the active keyset (`cannot-deactivate-active`). No dashboard button. |
-| `POST /keysets/set-fee` | `{id, input_fee_ppk}` | **Forks** the keyset (§8). `409 keyset-id-collision` if the new id already exists; `400 input_fee_ppk-too-large` if `> 100000`. |
-| `GET /quotes` | — | All mint + melt quotes with state/expiry. |
-| `POST /quotes/delete` | `{quote_id, type:"mint"\|"melt"}` | Delete a quote. Refused for `%issued`/`%paid` mint, `%paid` melt, and `%pending`/inflight melt (owed value — use abort instead). |
-| `POST /melt/abort` | `{quote_id, force?, secrets?, ys?}` | Reconcile/abort a stuck `PENDING` melt (§4). No dashboard button. |
-| `GET /spent` · `POST /spent/check` | `{secret}` \| `{Y}` | Double-spend ledger sizes / point lookup (read-only despite POST). |
-| `GET /info` · `POST /info/update` | `{name?, description?}` | NUT-06 info / edit name+description. |
+| `GET /overview` | — | `total_issued_sats`, `total_redeemed_sats`, counters, mint/melt quote tallies, `ln_backend`. `failed` quotes count as `unpaid`. |
+| `GET /settings` | — | `{fee_reserve_pct, fee_reserve_min, quote_ttl_secs, self_method_enabled}` |
+| `POST /settings` | any of those | Validated (§9); answers the full settings. |
+| `GET /lightning` | — | `{type, configured, url, api_key_set}`; never the credential. |
+| `POST /lightning/configure` | `{type:"none"}` \| `{type:"lnbits",url,api_key}` \| `{type:"lnd",url,macaroon}` | Sets the backend. |
+| `POST /lightning/test` | — | Calls the backend (LNbits `GET /api/v1/wallet`, LND `GET /v1/getinfo`) → `{status:"ok"\|"error", type, url, http_status, detail?, balance_msat?}`. `400 no-ln-backend` when none. |
+| `GET /keysets` · `GET /keysets/{id}` | — | List (with `key_count`, `denominations`) / one keyset with public keys. Private keys are never returned. |
+| `POST /keysets/generate` | — | New **inactive** keyset, 2^0..2^20, fee 0 → `{id, active, key_count}`. |
+| `POST /keysets/activate` | `{id}` | Makes it the active keyset; the previous one goes inactive. |
+| `POST /keysets/deactivate` | `{id}` | Refuses the active keyset (`cannot-deactivate-active`). |
+| `POST /keysets/set-fee` | `{id, input_fee_ppk}` | Forks to fresh keys under a new id (§8) → `{old_id, new_id, input_fee_ppk}`. Max 100000 (`input_fee_ppk-too-large`). |
+| `GET /quotes` | — | `mint_quotes` and `melt_quotes` with `method`, `state`, `expiry`, `expired`; melts with `payment_hash`. |
+| `POST /quotes/delete` | `{quote_id, type:"mint"\|"melt"}` | Refused for ISSUED or PAID mint quotes and PAID or PENDING melts (they are owed value). |
+| `POST /quotes/revoke` | `{quote_id}` | ⚠️ Destructive, below. |
+| `POST /melt/abort` | `{quote_id, force?, secrets?, ys?}` | §4. |
+| `GET /spent` · `POST /spent/check` | `{secret}` \| `{Y}` | Spent-set sizes / one lookup (read-only). |
+| `GET /info` · `POST /info/update` | `{name?, description?}` | NUT-06 info / edit name and description. |
 
-`%ecash-services` mirrors an admin surface at `/apps/ecash-services/admin/api/*`:
-`cred/overview`; `cred/keysets/generate|activate|deactivate`;
-`services` · `services/{name}`; `services/create|update|activate|deactivate|delete`;
-`services/allowlist/add|remove`. Same auth/CSRF model. Notable guards:
-`services/delete` requires the service inactive **and** `issued==0`
-(`service-has-issued-tokens` otherwise; `issued` is monotonic and never
-decremented), and it does **not** remove the backing keyset.
+**`/quotes/revoke`** deletes any mint quote, including ones `delete` refuses, and answers
+`{revoked, quote_id, type, was_state, issued_decremented}`.
+- **PAID**: a customer paid and has **not minted yet**. Revoking destroys their deposit as far
+  as the mint is concerned: they can never mint it. Do it only after refunding them some other
+  way, or when you know the payment is bogus.
+- **ISSUED**: the amount comes off `total_issued_sats`, declaring those tokens never to be
+  redeemed. If they are redeemed after all, outstanding liability goes negative.
 
----
+The dashboard asks for a typed confirmation before revoking a PAID quote or force-aborting.
 
-## 7. Public API surface (reference)
+**`%ecash-services`** (`/apps/ecash-services/admin/api/*`, same auth): `cred/overview` (each
+keyset with `service_scoped` and `service`); `cred/keysets/generate|activate|deactivate` (the
+last two refuse service keysets: `keyset-is-service-scoped`); `services`, `services/{name}`;
+`services/create|update|activate|deactivate|delete`; `services/allowlist/add|remove`.
+`services/delete` needs the service inactive and `issued == 0` (`issued` never decreases), and
+deactivates its keyset. `expires` and `max_issuance` must be `null` (clear) or a bare
+non-negative integer (`invalid-expires`, `invalid-max-issuance`); on update, an absent field is
+left alone. Service names are 1–64 of `a-z 0-9 _ -`, not `list`.
 
-Unauthenticated by protocol design. Knowing the surface helps with monitoring and
-abuse analysis (§12–13).
-
-- `GET /v1/keys` — active keysets + full pubkey maps. `GET /v1/keys/{id}` — one
-  keyset (active or not). `GET /v1/keysets` — all keysets, metadata only.
-- `GET /v1/info` — NUT-06 capabilities. Advertises `self` (min 1, max 512) always
-  and `bolt11` (min 1, max 1,000,000) only when a backend is configured.
-- `POST /v1/swap` — `{inputs, outputs}`. Conserves value: `(input_total − fee) ==
-  output_total` or `400 amounts-do-not-balance`. Rejects spent inputs,
-  duplicate-x outputs, bad signatures, unmet P2PK thresholds.
-- `POST /v1/mint/quote/{method}` · `GET .../{id}` · `POST /v1/mint/{method}`.
-- `POST /v1/melt/quote/bolt11` · `GET .../{id}` · `POST /v1/melt/bolt11` (§3–4).
-- `POST /v1/checkstate` — `{Ys:[...]}` (capital-Y key), NUT-07 spent lookup.
-- Batch cap: **100** inputs/outputs/Ys per request (`400 batch-too-large`).
-- ⚠️ bolt11 quote-create / poll / melt-POST return their real body
-  **asynchronously** (they dispatch an outbound LN HTTP request first); a monitor
-  expecting an instant JSON body on those paths will see a delayed response.
+**`/cred/v1/*` is public**: anyone can issue on an active plain credential keyset. Access control
+belongs in a service's allowlist.
 
 ---
 
-## 8. Keyset management & rotation
+## 7. Public API surface
 
-- **Rotation:** `keysets/generate`, then `keysets/activate {id}`. New tokens use
-  the new keyset; old tokens still verify under the old one (verify deliberately
-  accepts inactive keysets; only **minting** is refused under an inactive keyset —
-  `sign-outputs` returns `inactive-keyset`).
-- **Changing a fee forks the keyset.** The keyset id commits to the fee, so
-  `set-fee` derives a **new id**: it keeps the **old id as an inactive alias**
-  (old fee retained, so already-issued tokens still spend correctly) and creates a
-  **new active id** with the new fee, repointing `active-keyset` if the target was
-  active. Wallets caching the old active id will get `inactive-keyset` on mint
-  until they refresh `/v1/keysets`. Re-applying the *same* fee fork hits
-  `409 keyset-id-collision` (not idempotent once forked).
-- To retire the active keyset there is no one-step "deactivate active" — activate a
-  replacement first (which demotes the old one).
-- `%ecash-services` keysets generated via `services/create` are **service-scoped**:
-  they can only be signed/verified/redeemed via the gated `/services/{name}` path,
-  never the public `/cred` path. (Their public key is still fetchable by id, which
-  is harmless — a pubkey can't forge a signature.) Keysets from
-  `cred/keysets/generate` are *not* scoped and are publicly usable via `/cred`.
+Unauthenticated by protocol design.
+
+- `GET /v1/keys`: active keyset with keys. `GET /v1/keys/{id}`: any keyset. `GET /v1/keysets`:
+  all keysets, no keys.
+- `GET /v1/info`: nuts 3–12. Nuts 4 and 5 list `self` only while enabled and `bolt11` only while
+  a backend is configured, each with `min_amount` 1; nut 4's also carry `max_amount` (§9).
+- `POST /v1/swap`: claimed amounts must balance (`(inputs − fee) == outputs`, else
+  `400 amounts-do-not-balance`) before any EC work; then every output is checked
+  (`invalid-msg`, `missing-B_`, `invalid-B_-point`, `duplicate-output`, `output-already-signed`,
+  `unknown-keyset`, `inactive-keyset`, `unknown-denomination`); then every proof. Nothing is
+  spent unless all of it passes.
+- `POST /v1/mint/quote/{method}` · `GET …/{id}` · `POST /v1/mint/{method}`. Quotes over
+  `max_amount` are refused (`amount-too-large`). A `PAID` quote mints even after expiry.
+- `POST /v1/melt/quote/{method}` · `GET …/{id}` · `POST /v1/melt/{method}` (§3). bolt11
+  requests must be letters and digits only (`invalid-request`); a decode without a payment hash
+  is `502 lightning-decode-missing-hash`. A quote settles only by the method that made it
+  (`method-mismatch`).
+- `POST /v1/checkstate` `{Ys:[...]}` → `UNSPENT`, `PENDING` (in a melt in flight) or `SPENT`.
+- `POST /v1/restore` `{outputs:[...]}` → the stored signatures for any B_ the mint signed.
+- **Timing:** creating a bolt11 mint quote, a bolt11 melt quote, and `POST /v1/melt/bolt11` wait
+  for the Lightning backend's answer. Quote polls (`GET`) answer at once and check Lightning
+  behind the answer.
 
 ---
 
-## 9. Settings & economic tuning
+## 8. Keyset management and rotation
+
+- One keyset is active. New outputs must use it (`inactive-keyset` otherwise). **Every keyset
+  still in state verifies**, with its own input fee, so rotating never strands old tokens.
+- Keysets made now have denominations 2^0..2^20: `max_amount` 83,886,080 sats. A mint installed
+  earlier still has a 1..512 keyset, which caps each quote at 46,592 sats. **Rotate it:**
+
+  ```bash
+  B=https://mint.example.com/apps/ecash/admin/api
+  C='Cookie: urbauth-~your-ship=…'
+  curl -s -X POST -H "$C" $B/keysets/generate                 # → {"id":"01…","active":false,"key_count":21}
+  # only if you charge an input fee (the new keyset starts at 0):
+  curl -s -X POST -H "$C" -H 'content-type: application/json' \
+    -d '{"id":"01…","input_fee_ppk":100}' $B/keysets/set-fee   # → use its new_id below
+  curl -s -X POST -H "$C" -H 'content-type: application/json' \
+    -d '{"id":"01…"}' $B/keysets/activate
+  ```
+
+  Or use the dashboard's Keysets tab. Old tokens keep redeeming. Wallets that cached the old id
+  get `inactive-keyset` when minting until they refresh `/v1/keysets`.
+- **`set-fee` forks.** A keyset id commits to its fee, so `set-fee` makes a **fresh keyset** (new
+  keys, new id) with the new fee, and keeps the old id as an inactive alias with the old fee so
+  its tokens still spend. The keys are fresh because BDHKE doesn't bind the id into a signature:
+  copied keys would let anyone relabel a token to the cheaper id. If the old keyset was active
+  the new one is; otherwise the new one is inactive. The same fee again is a no-op.
+- There is no "deactivate the active keyset": activate a replacement.
+- **`%ecash-services`:** a service's keyset is service-scoped. It is used only through
+  `/services/v1/{name}/*` (never `/cred/v1`), can't be activated or deactivated through the cred
+  admin, and is deactivated when its service is deleted. Its public key is still fetchable by id,
+  which is harmless. Keysets from `cred/keysets/generate` are plain and publicly usable.
+
+---
+
+## 9. Settings and limits
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `self_method_enabled` | `false` | No-payment mint/melt. **Keep off in production.** |
-| `fee_reserve_pct` | `100` | Melt fee reserve, basis `amount × pct / 10000` (100 = 1%). |
-| `fee_reserve_min` | `10` | Sats floor: `reserve = max(min, pct·amount)`. |
-| `quote_ttl_secs` | `3600` | Quote lifetime (seconds). |
+| `self_method_enabled` | `false` | No-payment mint/melt. **Off on any real mint.** |
+| `fee_reserve_pct` | `100` | Melt fee reserve, basis points: `amount × pct / 10000` (100 = 1%). |
+| `fee_reserve_min` | `10` | Sats floor: `reserve = max(min, amount × pct / 10000)`. |
+| `quote_ttl_secs` | `3600` | Quote lifetime and bolt11 invoice expiry. Floored at 60. |
 | `mint_name` / `mint_description` | `ecash-mint` / `Cashu ecash mint on Urbit` | NUT-06 info. |
-| keyset `input_fee_ppk` | `0` | Per-proof input fee (ppk); cap `100000`, set via `set-fee`. |
-| batch cap | `100` | Constant (not settable). Max inputs/outputs/Ys per request. |
-| cleanup interval | daily (`~d1`) | Prunes expired quotes (§16). |
+| keyset `input_fee_ppk` | `0` | Per-proof input fee, set by `set-fee`; max 100000. |
 
-⚠️ **`POST /settings` performs no validation.** It applies any unsigned integer,
-including `0`. `quote_ttl_secs:0` expires every new quote instantly;
-`fee_reserve_pct:0` + `fee_reserve_min:0` zeroes the melt reserve. Enforce bounds
-yourself before calling. (Same hazard in `%ecash-services`: a malformed
-`max_issuance` or `expires` coerces to `0` — `max_issuance:0` permanently blocks
-issuance, `expires:0` expires the service immediately.)
+`POST /settings` changes only the fields you send. Each number must be a bare non-negative
+integer and `self_method_enabled` a boolean; anything else is `400 invalid-<field>` and nothing
+changes. `fee_reserve_pct: 0` with `fee_reserve_min: 0` is accepted and leaves no fee reserve:
+don't.
+
+Fixed limits: 100 inputs, outputs, Ys or restore outputs per request (`batch-too-large`); 1 MiB
+request body (`body-too-large`); 2048-byte secrets (`secret-too-long`); per-mint-quote `max_amount` =
+`(100 − m) × 2^m` for the active keyset's top denomination 2^m; P2PK locks of at most 10 keys
+and witnesses of at most 10 signatures.
 
 ---
 
-## 10. Backup & disaster recovery
+## 10. Backup and disaster recovery
 
-**All money-critical secrets live only in agent state inside the pier:** keyset
-**private keys** and the **Lightning credential** (LNbits api-key / LND macaroon).
-There is no key export and no separate secret store — **the pier is the backup
+**All money-critical secrets live only in agent state inside the pier:** keyset **private
+keys** and the **Lightning credential**. There is no key export: **the pier is the backup
 unit.**
 
-- **Back up the pier** on a schedule. A pier backup contains plaintext mint
-  privkeys *and* the LN credential — **encrypt the backup at rest** and restrict
-  access accordingly.
-- **A stale restore reintroduces double-spend/double-pay risk.** Restoring an old
-  pier snapshot silently reverts the spent-secret / spent-Y sets, all quotes, the
-  `melt-inflight` records, and the liability counters. Tokens spent *after* the
-  snapshot become spendable again; melts that paid after the snapshot can re-pay.
-  Treat any restore as an incident:
-  1. Before resuming public traffic, **reconcile against the Lightning node**:
-     compare the node's payment ledger to the restored melt-quote / `melt-inflight`
-     state; any payment the node made that the restored state shows `pending`
-     /`unpaid` must be settled or the inputs left spent.
-  2. Expect that proofs the restored state shows unspent may already have been
-     redeemed by holders — there is no automatic way to re-derive that. Prefer
-     restoring the **most recent** snapshot and, if value integrity is in doubt,
-     rotate to a fresh keyset and wind down the old liability deliberately.
-- **Do a restore drill** before you need one. Verify the restored mint answers
-  `/v1/info`, `/overview` shows the expected counters, and the active keyset id
-  matches (`/x/active-keyset` scry, host-only).
+- **Back up the pier** on a schedule, **encrypted**: it holds plaintext mint keys and the
+  credential.
+- **A stale restore reintroduces double-spend and double-pay risk.** An old snapshot reverts the
+  spent sets, quotes, `melt-inflight` records and liability counters: tokens spent after the
+  snapshot become spendable again, and melts that paid after it can pay again. Treat any restore
+  as an incident:
+  1. Before reopening, **reconcile against the Lightning node**: any payment the node made that
+     the restored state shows `PENDING` or `UNPAID` must be settled, or its inputs left spent.
+  2. Proofs the restored state shows unspent may already have been spent by holders; nothing can
+     re-derive that. Restore the **most recent** snapshot, and if value integrity is in doubt,
+     rotate to a fresh keyset and wind the old liability down deliberately.
+- **Do a restore drill.** Check that the restored mint answers `/v1/info`, that `/overview` shows
+  the expected counters, and that the active keyset matches (`/x/active-keyset` scry).
 
 ---
 
-## 11. Upgrade & state migration
+## 11. Upgrade and state migration
 
-`on-load` runs a **forward-only** migration chain (currently `state-6 → … →
-state-13`; services migrates `state-old → state-0`). Migrations cannot be
-reversed, and a **downgraded binary cannot read newer state** — a rollback to an
-older agent will fail to load.
+`on-load` migrates forward only: `%ecash` 13 → 14 (adds the NUT-09 `restore` map, empty) → 15
+(adds the overpayment to each inflight melt, recorded as 0). **It loads state 13 or later.** A
+mint below 13 must first upgrade through commit `eb7b56a`: build and commit that commit's desk,
+let it load, then upgrade to current. `%ecash-services` migrates 0 → 1, and on every load
+deactivates the keysets of deleted services. Migrations can't be reversed: older code can't
+load newer state.
 
 Procedure:
-1. **Take a pier backup first** (§10).
-2. If you changed shared crypto, run `make sync-libs` so
-   `desk-services/lib/{curve,bdhke}.hoon` are regenerated **before** committing the
-   services desk.
-3. `|commit` the desk(s); watch the load. Two migration steps have operational
-   side effects: `11→12` **clears the volatile pending map** (in-flight iris HTTP
-   requests are dropped across that upgrade — durable melt recovery relies on
-   `melt-inflight`, added in `12→13`, plus the §4 poll/abort path); `12→13`
-   initializes `melt-inflight` empty.
-4. **Verify post-upgrade:** `/overview` counters look sane, `/v1/info` responds,
-   active keyset unchanged (`/x/active-keyset`). Resolve any melts that were
-   in-flight across the upgrade via §4.
-5. Note: the daily cleanup timer is **not** re-armed on load (only on init and
-   after each fire — intentional, to avoid leaking timers). If an upgrade lands in
-   a window where the timer was already consumed, cleanup resumes on the next
-   natural fire; it is not money-critical (it only prunes *expired, non-owed*
-   quotes).
+1. **Back up the pier** (§10).
+2. Build and deploy with `build.sh` (it regenerates the services desk's shared libraries):
+   `./build.sh -p <pier>/ecash`, and `./build.sh services -p <pier>/ecash-services` if you run it.
+3. `|commit` each desk and watch the load.
+4. **Verify:** `/overview` counters look right, `/v1/info` answers, the active keyset is
+   unchanged. Resolve any melt that was in flight across the upgrade (§4).
+
+Notes: loading re-arms the daily cleanup timer (at the next day boundary), so no timer is lost
+across an upgrade. A melt in flight across the upgrade to 15 returns no overpayment as change.
+Signatures issued before state 14 aren't in the `restore` map, so NUT-09 can't return them.
 
 ---
 
-## 12. Monitoring, alerting & solvency
+## 12. Monitoring and solvency
 
-There is no metrics endpoint or webhook — signals are `GET /overview`,
-`GET /quotes`, and console `~&` traces. Build alerting around:
+There is no metrics endpoint: the signals are `GET /overview`, `GET /quotes` and console traces.
 
-- **Rising `%pending` melt count** → spent value with unresolved Lightning
-  outcome. Each is real money awaiting §4. Alert and work them down.
-- **`%paid`-but-unissued mint quotes** → sats received from a customer, tokens not
-  yet issued. Cleanup retains these forever (owed value); they should be
-  redeemable. Watch the count; a growing backlog means customers can't mint.
-- **Liability ceiling** → `total_issued_sats − total_redeemed_sats`. Alert if it
-  approaches your Lightning balance.
-- **Disk / event log** → `du -sh <pier>/.urb/log` and `df`. The log grows fast
-  under load and can fill the disk and wedge the ship (§16). Alert on a concrete
-  size threshold well below capacity.
-- **Silent Eyre bind failures** → if a `/v1` or legacy bind fails, the agent only
-  prints `%ecash-bind-v1-failed` / `%ecash-bind-legacy-failed` to the console; the
-  public API silently goes offline. Watch the trace log and probe `/v1/info`
-  externally.
+- **`PENDING` melts:** spent value with an unknown Lightning outcome. Each is real money awaiting
+  §4. Alert and work them down.
+- **`PAID` but unminted mint quotes:** a customer paid and hasn't minted. Kept forever (§16);
+  a growing backlog means customers can't mint.
+- **Liability:** `total_issued_sats − total_redeemed_sats`. Alert when it nears your Lightning
+  balance. It can go negative after revoking an ISSUED quote whose tokens were redeemed after all.
+- **Disk and event log:** `du -sh <pier>/.urb/log` and `df`. The log grows fast under load and
+  can fill the disk and wedge the ship (§16).
+- **Bind failures:** if eyre refuses a binding, the agent prints `%ecash-bind-failed` (or
+  `%ecash-services-bind-failed`) to the console and that API is offline. Probe `/v1/info`
+  from outside.
+- **Melt traces** worth alerting on: `%ecash-ln-pay-dispatched-pending`,
+  `%ecash-ln-pay-dispatch-rejected`, `%ecash-melt-confirmed-failed`, `%ecash-melt-abort-rollback`.
 
-**Solvency / proof-of-reserves.** Run a periodic check that Lightning balance ≥
-outstanding ecash liability — not just at incident time. The liability counters
-are cumulative totals, not a double-entry ledger (and the abort decrement clamps
-to 0 on underflow, which can understate redeemed), so cross-check against the LN
-node rather than trusting the counters alone.
+**Solvency.** Check regularly, not only in an incident, that the Lightning balance covers
+outstanding liability. The counters are running totals, not a ledger (and an abort's decrement
+stops at 0), so cross-check against the node.
 
 ---
 
-## 13. Capacity, abuse & rate limiting
+## 13. Capacity, abuse and rate limiting
 
-**No rate limiting exists in code.** The only bounds are the `100`-item batch cap
-and the `100000` `input_fee_ppk` cap. There is no per-IP throttle, no `429`, no cap
-on open mint quotes, no global liability ceiling, and no min/max mint/melt amount
-beyond the advertised NUT-04/05 ranges. `/v1/*` is fully public.
+In code: the per-request limits (§9); unbalanced swaps and melts refused on claimed amounts
+before any EC work; every cheap check (shape, secret size, spent, keyset, denomination, point
+decoding) run over the whole batch before any signature check.
 
-Compensating controls are the operator's responsibility:
-- Front the ship with a **reverse proxy that rate-limits** `/v1/*` per IP.
-- Watch for **quote-creation spam**: each bolt11 quote triggers an outbound LN
-  HTTP call and grows the event log; a flood is both a backend-load and a
-  disk-exhaustion vector (§16).
-- Consider application-level limits at the proxy (max body size, request rate)
-  since the mint will faithfully process anything within the batch cap.
+Not in code: per-IP limits, `429`, caps on open quotes, a liability ceiling.
+
+**CPU is the constraint.** The elliptic-curve math is pure Hoon: a 100-proof swap takes seconds
+of ship CPU, and the ship handles one event at a time, so while it works every other request
+waits. **The reverse proxy's rate limit is the main abuse control** (nginx example in
+`INSTALL.md` §3: 20 requests/s per IP, bursts of 40, on `/v1/`). Also watch for quote spam:
+each bolt11 mint quote makes an outbound Lightning call and grows the event log, and each poll of
+an unpaid quote makes another.
 
 ---
 
-## 14. Incident response: key / pier compromise
+## 14. Incident response: key or pier compromise
 
-A stolen pier copy is catastrophic: it contains every keyset's **private keys**
-(forge unlimited tokens under any keyset id — keyset rotation does **not** help,
-since old ids still verify) **and** the **Lightning credential** (drain the node
-up to the macaroon/api-key's scope).
+A stolen pier copy is catastrophic: every keyset's **private keys** (unlimited forgery under
+those ids; rotation doesn't help, since old ids still verify) **and** the **Lightning
+credential** (drain the wallet up to its scope).
 
-Response:
-1. **Rotate the Lightning credential at the node immediately** (new macaroon /
-   api-key, revoke the old). This is independent of keyset rotation and is the only
-   thing that stops node drainage. Re-`configure` the mint with the new credential.
+1. **Rotate the Lightning credential at the backend now** (new key or macaroon; revoke the old)
+   and re-`configure` the mint. Only this stops the wallet being drained.
 2. **Stop taking new value** on the compromised pier.
-3. **Wind down to a fresh pier**: stand up a new pier with a freshly-generated
-   keyset, migrate liability deliberately (let holders redeem / re-issue), and
-   **never reuse the exposed pier**. Tokens under the old keys can be forged
-   forever; the old mint's liability must be drained and retired, not trusted.
-4. Treat encrypted, access-controlled pier backups (§10) as part of the blast
-   radius — a leaked backup is a leaked pier.
+3. **Wind down to a fresh pier** with a new keyset; move liability deliberately (let holders
+   redeem) and **never reuse the exposed pier**.
+4. Pier backups are part of the blast radius: a leaked backup is a leaked pier.
 
 ---
 
 ## 15. Incident response: confirmed double-pay
 
-If a force-abort (§4) rolled back inputs and the HTLC later settled — or any path
-double-paid:
-1. **Detect** by comparing the Lightning node's payment ledger to the mint's
-   melt-quote / `melt-inflight` history and the `total_redeemed_sats` counter. A
-   settled HTLC for a quote the mint shows `failed`/`unpaid` is a double-pay.
-2. **Reconcile the books:** the un-spent proofs may already be re-spent; the sats
-   left the node. Quantify the loss against liability.
-3. **Absorb / contain:** there is no protocol clawback. Tighten the force-abort
-   authority (see below) and, if losses are material, rotate to a fresh keyset and
-   wind down.
+If a force-abort rolled back inputs and the payment later settled, or any path paid twice:
+1. **Detect:** compare the node's payment history with the mint's melt quotes and
+   `total_redeemed_sats`. A settled payment for a quote the mint shows `failed`/`UNPAID` is a
+   double-pay.
+2. **Reconcile:** the un-spent proofs may already be re-spent, and the sats left the node.
+   Quantify the loss against liability.
+3. **Contain:** there is no clawback. Tighten force-abort authority and, if losses are
+   material, rotate to a fresh keyset and wind down.
 
-**Prevention is the real control.** Force-abort is the one irreversible action;
-make it a two-person / pre-authorized decision and require independent LN-node
-confirmation that the HTLC is dead before anyone passes `force:true`.
+**Prevention is the control.** Make force-abort a two-person decision that requires independent
+confirmation on the node that the payment failed.
 
 ---
 
 ## 16. Maintenance
 
-- **Event-log growth.** Heavy traffic (and especially load-testing) grows
-  `<pier>/.urb/log` quickly — it can fill the disk and wedge the ship. Monitor
-  `du -sh <pier>/.urb/log` and `df`. To reclaim: stop the ship, then truncate the
-  event log with `urbit chop <pier>`; if the bloat is the *current* epoch, let the
-  ship roll a new epoch first, then chop the old one. The state snapshot
-  (`.urb/chk`) holds current state — chopping discards only history.
-- **Cleanup.** The daily behn timer prunes *expired* quotes, but **never** deletes
-  a `%paid` mint quote (sats received, awaiting issuance), a `%paid` melt quote
-  (may owe NUT-08 change), or a `%pending` melt (inputs spent, outcome
-  unresolved). Those are owed value and are retained indefinitely until consumed or
-  reconciled — an accumulation of stuck `%pending` melts is real spent value
-  awaiting §4, not garbage.
-- **Liability.** Outstanding = `total_issued_sats − total_redeemed_sats`
-  (`/overview`). A genuinely-failed melt that you abort decrements
-  `total_redeemed_sats` (clamped at 0 on underflow).
+- **Event log.** Heavy traffic (and load testing) grows `<pier>/.urb/log` quickly. To reclaim:
+  stop the ship and run `urbit chop <pier>`; if the bloat is in the current epoch, let the ship
+  roll a new epoch first. The snapshot holds current state; chop discards only history.
+- **Cleanup** runs once a day. It keeps: unexpired quotes; `PAID` mint quotes forever (a deposit
+  not yet minted); unpaid bolt11 mint quotes for **2 days past expiry**, checking each on
+  Lightning once in its first day past expiry when a backend is configured (so a deposit paid
+  just before expiry is found);
+  `PAID` melts for **30 days past expiry** (their change stays recoverable after that through
+  `/v1/restore`, which keeps every signature the mint issued); `PENDING` melts forever. It drops every other expired
+  quote (including `ISSUED` mint quotes and unpaid or failed melts) with its change and inflight
+  records.
+- **Liability:** outstanding = `total_issued_sats − total_redeemed_sats` (`/overview`).
 
 ---
 
-## 17. Security posture & residual operator responsibility
+## 17. Security posture and residual risk
 
-The automatic/public surface — mint, swap, BDHKE/DLEQ, P2PK multisig, the auto
-melt path, services access control — has been hardened across multiple adversarial
-audits and re-verified. Key invariants:
+Hardened across several adversarial audits:
+- **No forgery:** DLEQ nonces bound to the full points; P2PK counts distinct x-only signers
+  (verified with zuse's jetted BIP-340, stopping at the threshold); service tokens can't be issued
+  through the public path.
+- **No double-spend or double-pay:** melts are single-use; reconciliation never un-spends on
+  ambiguous evidence; every settle requires `PENDING`, so late answers do nothing; a recorded
+  B_ is never signed again (`output-already-signed`).
+- **No inflation:** swaps and mints balance and are all-or-nothing; `ISSUED` quotes can't be
+  re-minted; a missing proof `id` still pays the active keyset's fee; inactive keysets sign
+  nothing; a bolt11 quote can't be settled by the `self` method.
+- **Fail-closed money math:** refunds round against the mint; malformed input gets a clean 400.
 
-- **No forgery:** DLEQ nonce bound to full points; P2PK counts distinct x-only
-  signers; service tokens are unforgeable via the public path.
-- **No double-spend / double-pay:** melt is single-use-guarded; reconciliation
-  never un-spends on ambiguous evidence; every settle gates on `%pending` (stale
-  responses are no-ops).
-- **No inflation:** mint/swap conserve value; `%issued` quotes can't be re-minted;
-  fees can't be evaded by omitting a proof id; minting under an inactive keyset is
-  refused; zero-amount value outputs are rejected.
-- **Fail-closed money math:** fee refunds round against the mint; underflows are
-  guarded; malformed input returns clean `400`s, never a crashed event.
-
-**Residuals that are operator responsibility, not code guarantees:**
-1. A **force-abort** of a payment you wrongly believe failed will double-pay
-   (§4, §15).
-2. **No rate limiting / abuse controls** exist in code (§13).
-3. **No bounds-checking** on economic settings (§9).
-4. **Secrets live in the pier in cleartext**; backup hygiene and credential
-   least-privilege are yours (§10, §14).
+**Residual risk, the operator's to manage:**
+1. A **force-abort** of a payment that didn't really fail pays twice (§4, §15).
+2. **No rate limiting** in code; CPU-heavy requests (§13).
+3. **Secrets in the pier in cleartext**; backup hygiene and least-privilege credentials are
+   yours (§10, §14).
+4. **LND untested** against a real node (§5).
+5. **`self` method** mints unbacked value if turned on (§2).
+6. **Responses readable by a guessing ship.** An agent can't tell eyre's requests from a remote
+   ship's subscription, so a foreign ship that guessed an in-flight request id could read that
+   response.
 
 ---
 
-## 18. Appendix: install, tests, known quirks
+## 18. Appendix: install, tests, quirks
 
-**Install (per agent).** `|new-desk %ecash` → `|mount %ecash` → copy `desk/`
-contents into the mount → `|commit %ecash` → `|install our %ecash`. Repeat for
-`%ecash-services` from `desk-services/` — but **run `make sync-libs` first** on a
-fresh clone, or the build fails (the shared `desk-services/lib/{curve,bdhke}.hoon`
-are gitignored, generated from `desk/lib`). Configure Lightning via the admin API
-(§2) or a host-only `%noun` poke `:ecash [%lnbits 'http://…' 'api-key']` (asserts
-`src == our`).
+**Install.** See [`INSTALL.md`](INSTALL.md). Always deploy with `build.sh -p` (it adds the
+base-dev files and the services desk's shared libraries); don't copy `desk/` by hand. The
+Lightning backend can also be set from the dojo (host only):
+`:ecash [%lnbits 'https://…' 'api-key']`, `:ecash [%lnd 'https://…' 'macaroon']`,
+`:ecash [%none ~]`.
 
-**Toolchain.** Urbit vere 4.x, zuse kelvin `409` (`sys.kelvin`). Browser-side
-crypto in tests: `@noble/secp256k1`. JS deps are test/dev only.
+**Toolchain.** The desks declare `[%zuse 408]`: upgrade a 409 ship's `%base` before installing. The JS tooling needs Node.js
+(`engines` in `package.json`) and `npm install`; it is for testing only.
 
-**Test suite (operational smoke / verification).** `npm run test:all` runs the
-full suite (e2e, conformance, p2pk, cred, services, services-scope, swap-security,
-vectors, melt-fee, melt-p6, admin-auth, self-method, parse-robustness,
-legacy-removed, dashboards). Lightning tests need the mock on port 3338
-(`make mock-lnbits`) and the mint pointed at it
-(`:ecash [%lnbits 'http://localhost:3338' 'test-api-key']`).
-**`test-conformance.mjs` requires `URBAUTH_COOKIE`** in the environment (it no
-longer hardcodes a session cookie): `URBAUTH_COOKIE=<ship-cookie> npm run
-test:conformance`. Hoon unit tests: `-test /=ecash=/tests/test/hoon`.
+**Tests.** **Never run them against a mint holding real value**: they change settings. The JS
+suites (`npm run test:all`) need `SHIP_URL` and `URBAUTH_COOKIE` for a ship running both agents;
+the Lightning suites use a mock LNbits; suites that change settings refuse a non-loopback
+`SHIP_URL` unless `ALLOW_DESTRUCTIVE=1`. The Hoon unit suites run on a separate `%ecash-test` desk
+(`scripts/hoon-test-kit/hoon-test.sh <pier>`, see [`hoon-testing.md`](hoon-testing.md)).
 
-**Known quirks (don't be surprised):**
-- **Version strings differ**: `/v1/info` reports `ecash/0.2.0` while the legacy
-  `/apps/ecash` status reports `0.2.0`.
-- **`/lightning/test` doesn't probe the node** — it only reports config presence.
-- **`%failed` melts serialize as `UNPAID`** to wallets (correct for retry); read
-  the on-state tag to tell a fresh quote from a failed-and-rolled-back one.
-- **README version text may lag** the source; trust the source (`state-13`) and
-  `package.json` for versions.
+**Quirks:**
+- `/v1/info` reports version `ecash/1.0.0`; the legacy `GET /apps/ecash` reports `1.0.0`.
+- A `failed` melt (rolled back) shows as `UNPAID` to wallets, which is correct for a retry;
+  `/quotes` shows the same, and `/overview` counts it as unpaid.

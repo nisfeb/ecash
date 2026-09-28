@@ -1,59 +1,46 @@
 # ecash mint — development helpers
 #
-# Prerequisites:
-#   npm install              (one-time, installs @noble/secp256k1 etc.)
-#   Fake zod running on localhost:8080 with %ecash desk installed
-#
-# For Lightning tests, also need mock LNbits running:
-#   make mock-lnbits         (runs in foreground)
-#   Configure mint: :ecash [%lnbits 'http://localhost:3338' 'test-api-key']
+# Tests: `npm install` once, then point them at a ship running %ecash and
+# %ecash-services (run-tests.mjs says what each suite needs):
+#   SHIP_URL=http://localhost:8080 URBAUTH_COOKIE='urbauth-~zod=0v…' make test
+#   make test-p2pk           (one suite: npm run test:p2pk)
+# The Lightning suites start their own mock LNbits; `make mock-lnbits` runs
+# one in the foreground for the demo.
 
-.PHONY: test test-p2pk test-cred test-lightning test-all mock-lnbits install deploy test-security test-conformance sync-libs
+.PHONY: test mock-lnbits install deploy sync-libs hoon-test
 
 # Shared crypto: desk/lib is the single source of truth; regenerate the
 # %ecash-services copies from it (they are gitignored). Run before building
 # the %ecash-services desk.
 sync-libs:
 	mkdir -p desk-services/lib
-	cp desk/lib/curve.hoon desk/lib/bdhke.hoon desk-services/lib/
+	cp desk/lib/curve.hoon desk/lib/bdhke.hoon desk/lib/ecash-http.hoon desk-services/lib/
 
-# Run core tests (no Lightning required)
-test: test-p2pk test-cred
+# Every release-gating suite (npm run test:all), or one: make test-<suite>
+test:
+	npm run test:all
 
-# Individual test suites
-test-p2pk:
-	node test-p2pk.mjs
+test-%:
+	npm run test:$*
 
-test-cred:
-	node test-cred.mjs
-
-test-lightning:
-	node test-lightning.mjs
-
-# Run everything (Lightning tests require mock-lnbits running separately)
-test-all: test-p2pk test-cred test-lightning
-
-# Start mock LNbits server on port 3338
+# Mock LNbits on port 3338, in the foreground
 mock-lnbits:
-	node mock-lnbits.mjs
+	npm run mock:lnbits
 
 # Install npm dependencies
 install:
 	npm install
 
-# Phase 1 security regression (set URBAUTH_COOKIE for the authenticated paths)
-test-security:
-	node test-admin-auth.mjs
-	node test-legacy-removed.mjs
-	node test-parse-robustness.mjs
-	node test-self-method.mjs
-	node test-swap-security.mjs
-
-# Phase 2 wallet conformance (needs mock-lnbits running + URBAUTH_COOKIE)
-test-conformance:
-	node test-conformance.mjs
-
-# Copy desk files to mounted Clay desk and commit
-# Assumes zod is mounted at ./zod/ecash/
+# Build both desks and copy them into mounted desks, then |commit each in
+# the ship's dojo. build.sh brings the base-dev deps and wipes the target,
+# refusing a directory with no sys.kelvin:
+#   make deploy PIER=/path/to/pier
 deploy:
-	cp -r desk/* zod/ecash/
+	@test -n "$(PIER)" || { echo "usage: make deploy PIER=/path/to/pier" >&2; exit 1; }
+	./build.sh -p $(PIER)/ecash
+	./build.sh services -p $(PIER)/ecash-services
+
+# Hoon unit suites on a fake ship's %ecash-test desk (see docs/hoon-testing.md)
+hoon-test:
+	@test -n "$(PIER)" || { echo "usage: make hoon-test PIER=/path/to/pier" >&2; exit 1; }
+	scripts/hoon-test-kit/hoon-test.sh $(PIER)

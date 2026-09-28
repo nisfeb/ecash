@@ -10,21 +10,18 @@
 //
 // No real money moves — the mock LNbits backend simulates the Lightning side.
 //
-// Prereqs (already true on the dev ship):
-//   - %ecash mint serving at SHIP_URL          (default http://localhost:8080)
+// Prereqs:
+//   - %ecash mint serving at SHIP_URL (required, e.g. http://localhost:8080)
 //   - bolt11 backend configured to the mock     (default http://localhost:3338)
 //   - mock-lnbits.mjs running                    (npm run mock:lnbits)
 //
 // Usage:
-//   node demo.mjs            # narrated, paced for presenting to a room
-//   node demo.mjs --fast     # same flow, no pauses
+//   SHIP_URL=… node demo.mjs            # narrated, paced for presenting to a room
+//   SHIP_URL=… node demo.mjs --fast     # same flow, no pauses
 //   SHIP_URL=… MOCK_URL=… API_KEY=… node demo.mjs
 
-import * as secp from '@noble/secp256k1';
-import { sha256 } from '@noble/hashes/sha256';
-import { bytesToHex, randomBytes } from '@noble/hashes/utils';
+import { SHIP_URL, outputs, inputs, yHex, invoice } from './test-helpers.mjs';
 
-const SHIP_URL = process.env.SHIP_URL || 'http://localhost:8080';
 const MOCK_URL = process.env.MOCK_URL || 'http://localhost:3338';
 const API_KEY  = process.env.API_KEY  || 'test-api-key';
 const FAST = process.argv.includes('--fast') || process.env.FAST === '1';
@@ -80,44 +77,9 @@ function wallet(name, proofs) {
 }
 
 // ───────────────────────── BDHKE crypto ─────────────────────────
-// Blind-signature math: the wallet blinds a secret, the mint signs the blind,
-// the wallet unblinds to a token the mint never saw in the clear.
-function hashToCurve(secret) {
-  const dom = new TextEncoder().encode('Secp256k1_HashToCurve_Cashu_');
-  const msg = new TextEncoder().encode(secret);
-  const buf = new Uint8Array(dom.length + msg.length);
-  buf.set(dom); buf.set(msg, dom.length);
-  const h0 = sha256(buf);
-  for (let i = 0; i < 65536; i++) {
-    const ctr = new Uint8Array(4);
-    new DataView(ctr.buffer).setUint32(0, i, true);
-    const p = new Uint8Array(36); p.set(h0); p.set(ctr, 32);
-    try { return secp.Point.fromHex('02' + bytesToHex(sha256(p))); } catch { /* retry */ }
-  }
-  throw new Error('hashToCurve failed');
-}
-const randScalar = () => BigInt('0x' + bytesToHex(secp.utils.randomPrivateKey()));
-const mintPub = (ks, amount) => secp.Point.fromHex(ks.keys[String(amount)]);
-
-// One blinded output for a given denomination.
-function blind(amount) {
-  const secret = `demo:${amount}:${bytesToHex(randomBytes(16))}`;
-  const r = randScalar();
-  const B_ = hashToCurve(secret).add(secp.Point.BASE.multiply(r));
-  return { amount, secret, r, B_hex: B_.toHex(true) };
-}
-const toOutput = (ks, b) => ({ amount: b.amount, B_: b.B_hex, id: ks.id });
-const toInput = (p) => ({ amount: p.amount, secret: p.secret, C: p.C, id: p.id });
-
-// Unblind the mint's signatures back into spendable proofs (index-matched to the
-// blinds we sent; the change amount is taken from the signature for NUT-08).
-function proofsFromSigs(ks, sigs, blinds) {
-  return sigs.map((sig, i) => {
-    const K = mintPub(ks, sig.amount);
-    const C = secp.Point.fromHex(sig.C_).subtract(K.multiply(blinds[i].r));
-    return { amount: sig.amount, secret: blinds[i].secret, C: C.toHex(true), id: ks.id };
-  });
-}
+// Blind-signature math (test-helpers.mjs, on cashu-ts): the wallet blinds a
+// secret, the mint signs the blind, the wallet unblinds to a token the mint
+// never saw in the clear.
 
 // Greedy power-of-two decomposition (how Cashu wallets pick denominations).
 function denoms(n) {
@@ -144,6 +106,7 @@ async function keyset() { if (!KS) KS = (await jget('/v1/keys')).keysets[0]; ret
 
 // ───────────────────────── prerequisites ─────────────────────────
 async function preflight() {
+  if (!SHIP_URL) { fail('Set SHIP_URL to the mint, e.g. SHIP_URL=http://localhost:8080'); process.exit(1); }
   let info;
   try { info = await jget('/v1/info'); }
   catch {
@@ -160,7 +123,7 @@ async function preflight() {
     narr(`    ${SHIP_URL}/apps/ecash/admin/api/lightning/configure`);
     process.exit(1);
   }
-  try { await mock('/api/v1/internal/invoices'); }
+  try { await mock('/api/v1/internal/state'); }
   catch {
     fail(`The mock Lightning backend isn't running at ${MOCK_URL}.`);
     narr('Start it with:  npm run mock:lnbits   (or: node mock-lnbits.mjs)');
@@ -171,10 +134,8 @@ async function preflight() {
 
 // "Pay" a bolt11 mint-quote invoice through the mock, the way a real user would
 // pay the Lightning invoice — then poll until the mint sees it settle.
-async function payInvoice(amount, quoteId) {
-  const inv = await (await mock('/api/v1/internal/invoices')).json();
-  const id = Object.keys(inv).filter((k) => inv[k].amount === amount).pop();
-  await mock('/api/v1/internal/mark-paid/' + id, { method: 'POST' });
+async function payInvoice(bolt11, quoteId) {
+  await mock('/api/v1/internal/mark-paid', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ bolt11 }) });
   for (let i = 0; i < 15; i++) {
     const st = await jget(`/v1/mint/quote/bolt11/${quoteId}`);
     if (st.state === 'PAID') return true;
@@ -216,17 +177,17 @@ async function main() {
   await beat();
   narr('Before she pays, her wallet prepares blinded outputs — each a secret');
   narr('hidden behind a random blinding factor. The mint will sign blindly.');
-  const aliceBlinds = denoms(DEPOSIT).map(blind);
-  step(`Alice blinds ${aliceBlinds.length} outputs for ${sat(DEPOSIT)}: ${C.dim}[${denoms(DEPOSIT).join(', ')}]${C.reset}`);
+  const aliceBlinds = outputs(denoms(DEPOSIT), ks.id);
+  step(`Alice blinds ${aliceBlinds.msgs.length} outputs for ${sat(DEPOSIT)}: ${C.dim}[${denoms(DEPOSIT).join(', ')}]${C.reset}`);
   await beat();
   step('Alice pays the Lightning invoice…');
-  const paid = await payInvoice(DEPOSIT, q.quote);
+  const paid = await payInvoice(q.request, q.quote);
   if (!paid) { fail('Invoice never settled (is the mock running?)'); process.exit(1); }
   ok('Mint saw the payment confirm on Lightning — quote is PAID.');
   await beat();
-  const mintRes = await jpost('/v1/mint/bolt11', { quote: q.quote, outputs: aliceBlinds.map((b) => toOutput(ks, b)) });
+  const mintRes = await jpost('/v1/mint/bolt11', { quote: q.quote, outputs: aliceBlinds.msgs });
   if (mintRes.detail) { fail(`mint failed: ${mintRes.detail}`); process.exit(1); }
-  let alice = proofsFromSigs(ks, mintRes.signatures, aliceBlinds);
+  let alice = aliceBlinds.proofs(mintRes.signatures, ks.keys);
   ok('Mint returned blind signatures; Alice unblinds them into tokens.');
   if (mintRes.signatures[0]?.dleq) note('Each signature carries a DLEQ proof (NUT-12): Alice can verify the mint used the real key — no tagging.');
   wallet('Alice', alice);
@@ -239,16 +200,14 @@ async function main() {
   narr('tokens to the mint, which burns them and issues fresh ones — some for Bob,');
   narr('the rest as Alice\'s change. The mint just sees tokens in, tokens out.');
   await beat();
-  const bobBlinds = denoms(SEND).map(blind);
-  const changeBlinds = denoms(DEPOSIT - SEND).map(blind);   // fee is 0 on this keyset
-  const swap = await jpost('/v1/swap', {
-    inputs: alice.map(toInput),
-    outputs: [...bobBlinds, ...changeBlinds].map((b) => toOutput(ks, b)),
-  });
+  const nBob = denoms(SEND).length;
+  const swapBlinds = outputs([...denoms(SEND), ...denoms(DEPOSIT - SEND)], ks.id);   // fee is 0 on this keyset
+  const swap = await jpost('/v1/swap', { inputs: inputs(alice), outputs: swapBlinds.msgs });
   if (swap.detail) { fail(`swap failed: ${swap.detail}`); process.exit(1); }
   const spentAlice = alice;                                  // keep for the double-spend act
-  const bob = proofsFromSigs(ks, swap.signatures.slice(0, bobBlinds.length), bobBlinds);
-  alice = proofsFromSigs(ks, swap.signatures.slice(bobBlinds.length), changeBlinds);
+  const swapped = swapBlinds.proofs(swap.signatures, ks.keys);
+  const bob = swapped.slice(0, nBob);
+  alice = swapped.slice(nBob);
   ok('Swap done. Fresh tokens issued.');
   wallet('Bob  ', bob);
   wallet('Alice', alice);
@@ -260,11 +219,7 @@ async function main() {
   narr('The tokens Alice gave Bob are now spent. What if Alice tries to spend');
   narr('her old copies again — say, pay someone else with the same tokens?');
   await beat();
-  const replayBlinds = denoms(DEPOSIT).map(blind);
-  const replay = await jpost('/v1/swap', {
-    inputs: spentAlice.map(toInput),
-    outputs: replayBlinds.map((b) => toOutput(ks, b)),
-  });
+  const replay = await jpost('/v1/swap', { inputs: inputs(spentAlice), outputs: outputs(denoms(DEPOSIT), ks.id).msgs });
   if (replay.detail === 'token-already-spent') {
     ok(`Mint rejected it: ${C.bold}token-already-spent${C.reset}. Each token spends exactly once.`);
   } else {
@@ -272,8 +227,8 @@ async function main() {
   }
   await beat();
   step('Anyone can check a token\'s status without spending it (NUT-07):');
-  const aliceYs = spentAlice.map((p) => hashToCurve(p.secret).toHex(true));
-  const bobYs = bob.map((p) => hashToCurve(p.secret).toHex(true));
+  const aliceYs = spentAlice.map((p) => yHex(p.secret));
+  const bobYs = bob.map((p) => yHex(p.secret));
   const cs = await jpost('/v1/checkstate', { Ys: [...aliceYs.slice(0, 2), ...bobYs.slice(0, 2)] });
   const states = cs.states.map((s) => s.state);
   ok(`Alice's old tokens: ${C.red}${states.slice(0, 2).join(', ')}${C.reset}   ·   Bob's tokens: ${C.grn}${states.slice(2).join(', ')}${C.reset}`);
@@ -286,7 +241,7 @@ async function main() {
   narr('mint a Lightning invoice; the mint melts his tokens and pays it.');
   await beat();
   // Pick an amount so inputs == amount + fee_reserve (no overpayment lost).
-  const fakeInvoice = (amt) => `lnbc${amt}n1pdemo${bytesToHex(randomBytes(6))}`;
+  const fakeInvoice = (amt) => invoice(amt * 1000);
   let meltAmount = bobTotal - 10;                            // 10 = default fee_reserve_min
   let mq = await jpost('/v1/melt/quote/bolt11', { request: fakeInvoice(meltAmount) });
   if (mq.amount + mq.fee_reserve !== bobTotal) {             // adjust if reserve differs
@@ -296,15 +251,11 @@ async function main() {
   step(`Melt quote: pay ${sat(mq.amount)}, fee reserve ${sat(mq.fee_reserve)}  →  needs ${sat(mq.amount + mq.fee_reserve)} in tokens`);
   narr('The reserve covers worst-case routing fees; whatever isn\'t used comes back as change (NUT-08).');
   await beat();
-  const meltChangeBlinds = changeDenoms(mq.fee_reserve).map(blind);
-  const melt = await jpost('/v1/melt/bolt11', {
-    quote: mq.quote,
-    inputs: bob.map(toInput),
-    outputs: meltChangeBlinds.map((b) => toOutput(ks, b)),
-  });
+  const meltChangeBlinds = outputs(changeDenoms(mq.fee_reserve).map(() => 0), ks.id);   // NUT-08 blanks
+  const melt = await jpost('/v1/melt/bolt11', { quote: mq.quote, inputs: inputs(bob), outputs: meltChangeBlinds.msgs });
   if (melt.state !== 'PAID') { fail(`melt did not settle: ${JSON.stringify(melt).slice(0, 120)}`); process.exit(1); }
   ok(`Mint paid the Lightning invoice. Preimage: ${C.gry}${short(melt.payment_preimage, 16)}${C.reset}`);
-  const bobChange = melt.change?.length ? proofsFromSigs(ks, melt.change, meltChangeBlinds) : [];
+  const bobChange = melt.change?.length ? meltChangeBlinds.proofs(melt.change, ks.keys) : [];
   const changeTotal = bobChange.reduce((a, p) => a + p.amount, 0);
   const actualFee = mq.fee_reserve - changeTotal;
   ok(`Routing fee was ${sat(actualFee)}; unused reserve returned as change: ${sat(changeTotal)}.`);

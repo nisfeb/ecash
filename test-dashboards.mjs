@@ -1,12 +1,15 @@
-// Both admin dashboards load under their CSP: a fresh nonce on each page's
-// own script and no inline event handlers, which that CSP would block (the
-// services dashboard sat dead for months that way with nothing checking it).
-import { run, check, refused, section, call } from './test-helpers.mjs';
+// Both admin dashboards (%ecash's and %tessera's) load under their CSP: a
+// fresh nonce on each page's own script and no inline event handlers, which
+// that CSP would block (a dashboard once sat dead for months that way with
+// nothing checking it).
+import { run, check, section, call, SHIP_URL } from './test-helpers.mjs';
 
 await run('dashboards', { auth: true }, async () => {
-  for (const page of ['/apps/ecash/admin', '/apps/ecash-services/admin']) {
+  for (const page of ['/apps/ecash/admin', '/apps/tessera']) {
     section(page);
-    refused('without a session: 401', await call(page), 401, 'unauthorized');
+    const out = await fetch(SHIP_URL + page, { redirect: 'manual' });
+    check('without a session: refused (401, or sent to log in)',
+      out.status === 401 || (out.status === 303 && out.headers.get('location')?.startsWith('/~/login')), out.status);
     const [a, b] = [await call(page, { auth: true }), await call(page, { auth: true })];
     check('with one: 200 html', a.status === 200 && (a.headers.get('content-type') ?? '').startsWith('text/html'), a.status);
     const csp = a.headers.get('content-security-policy') ?? '';

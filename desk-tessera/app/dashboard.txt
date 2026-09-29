@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Tessera</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{color-scheme:dark}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0b1413;color:#e2e8f0;min-height:100vh}
+.hdr{background:#0d1f1d;border-bottom:1px solid #134e4a;padding:14px 24px;display:flex;align-items:center;gap:12px}
+.hdr h1{font-size:1.15rem;font-weight:700;color:#f8fafc}
+.ver{font-size:.65rem;background:#14b8a6;color:#0f1a18;padding:2px 8px;border-radius:12px;font-weight:700}
+.sta{margin-left:auto;font-size:.8rem;color:#64748b}
+.wrap{max-width:1200px;margin:0 auto;padding:20px 24px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.box{background:#0d1f1d;border:1px solid #134e4a;border-radius:10px;padding:16px}
+.num{font-size:1.8rem;font-weight:700;color:#14b8a6}
+.lbl{color:#94a3b8;font-size:.8rem;margin-top:4px}
+.card{background:#0d1f1d;border:1px solid #134e4a;border-radius:10px;margin-bottom:16px}
+.ch{padding:14px 18px;border-bottom:1px solid #134e4a;display:flex;align-items:center;justify-content:space-between;font-weight:600;font-size:.95rem;gap:12px;flex-wrap:wrap}
+.cb{padding:18px}
+.tabs{display:flex;gap:2px;background:#0b1413;padding:3px;border-radius:8px;margin-bottom:20px;width:fit-content;border:1px solid #134e4a}
+.tab{padding:7px 14px;border-radius:6px;cursor:pointer;font-size:.82rem;font-weight:500;color:#94a3b8;border:none;background:transparent}
+.tab.on{background:#14b8a6;color:#0f1a18;font-weight:700}
+.tab:hover:not(.on){color:#14b8a6}
+.sec{display:none}.sec.on{display:block}
+.tbl-wrap{overflow-x:auto}
+.tbl{width:100%;border-collapse:collapse}
+.tbl th{text-align:left;padding:10px 12px;background:#0b1413;color:#94a3b8;font-size:.78rem;text-transform:uppercase;letter-spacing:.5px;font-weight:600}
+.tbl td{padding:10px 12px;border-top:1px solid #0f1f1d;font-size:.85rem}
+.badge{display:inline-block;padding:2px 10px;border-radius:12px;font-size:.72rem;font-weight:600;margin-left:4px}
+.b-on{background:#042f2e;color:#5eead4}
+.b-off{background:#1f2937;color:#9ca3af}
+.b-gate{background:#1e1b4b;color:#a78bfa}
+.mono{font-family:'SF Mono',Consolas,monospace;font-size:.78rem;word-break:break-all}
+.muted{color:#64748b}
+.accent{color:#14b8a6}
+.btn{padding:8px 16px;background:#14b8a6;color:#0f1a18;border:none;border-radius:8px;cursor:pointer;font-size:.82rem;font-weight:700;white-space:nowrap}
+.btn:hover{background:#0d9488}
+.rbtn{background:transparent;border:1px solid #134e4a;color:#94a3b8;padding:5px 10px;border-radius:6px;cursor:pointer;font-size:.78rem}
+.rbtn:hover{border-color:#14b8a6;color:#14b8a6}
+.fld{display:flex;flex-direction:column;gap:4px;margin-bottom:12px;flex:1;min-width:150px}
+.fld label{font-size:.8rem;color:#94a3b8}
+.fld input,.fld select,.fld textarea{width:100%;background:#0b1413;border:1px solid #134e4a;color:#e2e8f0;padding:8px 12px;border-radius:8px;font-size:.85rem;font-family:'SF Mono',Consolas,monospace}
+.fld textarea{min-height:54px;resize:vertical}
+.frow{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap}
+.hint{font-size:.72rem;color:#64748b}
+.toast{position:fixed;bottom:20px;right:20px;background:#14b8a6;color:#0f1a18;padding:10px 20px;border-radius:8px;font-weight:700;font-size:.85rem;opacity:0;transition:opacity .3s;pointer-events:none;z-index:9;max-width:60vw}
+.empty{padding:28px;text-align:center;color:#64748b;font-size:.85rem}
+.svc{background:#0a1514;border:1px solid #134e4a;border-radius:10px;padding:14px 16px;margin-bottom:10px}
+.svc .nm{font-size:.9rem;font-weight:700;color:#14b8a6}
+.svc .meta{display:flex;gap:14px;margin-top:8px;font-size:.75rem;color:#94a3b8;flex-wrap:wrap}
+.svc .meta b{color:#14b8a6}
+.edit{margin-top:12px;padding:12px;background:#0b1413;border:1px solid #134e4a;border-radius:8px}
+.out{margin-top:10px;padding:10px;background:#0b1413;border:1px solid #134e4a;border-radius:8px;max-height:220px;overflow:auto}
+</style>
+</head>
+<body>
+<div class="hdr">
+  <span style="font-size:1.4rem" aria-hidden="true">&#x1F39F;</span>
+  <h1>Tessera</h1>
+  <span class="ver">Admin</span>
+  <span class="sta" id="sta" role="status">Loading...</span>
+</div>
+<div class="wrap">
+  <div class="tabs" id="tabs">
+    <button class="tab on" data-tab="ov">Overview</button>
+    <button class="tab" data-tab="sv">Services</button>
+    <button class="tab" data-tab="wl">Wallet</button>
+  </div>
+
+  <div id="sec-ov" class="sec on">
+    <div class="card">
+      <div class="ch"><span>Overview</span>
+        <span style="display:flex;gap:8px">
+          <button class="rbtn" data-action="prune">Prune now</button>
+          <button class="rbtn" data-action="refresh-ov">Refresh</button>
+        </span>
+      </div>
+      <div class="cb"><div class="grid" id="ov-stats"><em class="muted">Loading...</em></div></div>
+    </div>
+  </div>
+
+  <div id="sec-sv" class="sec">
+    <div class="card">
+      <div class="ch"><span>New service</span></div>
+      <div class="cb">
+        <div class="frow">
+          <div class="fld"><label for="new-name">Name</label>
+            <input id="new-name" placeholder="chat" maxlength="64" autocomplete="off">
+            <div class="hint">a-z, 0-9, _ and -; its URL is /tessera/&lt;name&gt;</div></div>
+          <div class="fld"><label for="new-title">Title</label><input id="new-title" placeholder="Chat access"></div>
+          <button class="btn" data-action="create">Create</button>
+        </div>
+        <div class="hint">A new service issues only to this ship until you open it or name who may have tokens (Edit).</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="ch"><span>Services</span><button class="rbtn" data-action="refresh-sv">Refresh</button></div>
+      <div class="cb" id="svc-list"><em class="muted">Loading...</em></div>
+    </div>
+  </div>
+
+  <div id="sec-wl" class="sec">
+    <div class="card">
+      <div class="ch"><span>Tokens this ship holds</span><button class="rbtn" data-action="refresh-wl">Refresh</button></div>
+      <div class="cb" id="wl-list"><em class="muted">Loading...</em></div>
+    </div>
+    <div class="card">
+      <div class="ch"><span>Get, use, give</span></div>
+      <div class="cb">
+        <div class="frow">
+          <div class="fld"><label for="w-issuer">Issuer</label><input id="w-issuer" placeholder="~sampel-palnet"></div>
+          <div class="fld"><label for="w-svc">Service</label><input id="w-svc" placeholder="chat"></div>
+          <div class="fld" style="max-width:110px"><label for="w-n">How many</label><input id="w-n" type="number" min="1" max="10" value="1"></div>
+        </div>
+        <div class="frow">
+          <div class="fld"><label for="w-agent">Deliver to agent (optional)</label><input id="w-agent" placeholder="an agent on the issuer"></div>
+          <div class="fld"><label for="w-data">With data (JSON, optional)</label><input id="w-data" placeholder='{"text":"hi"}'></div>
+          <div class="fld"><label for="w-to">Give to</label><input id="w-to" placeholder="~ship"></div>
+        </div>
+        <div class="frow">
+          <button class="btn" data-action="w-get">Get</button>
+          <button class="btn" data-action="w-use">Use one</button>
+          <button class="btn" data-action="w-take">Take one out</button>
+          <button class="btn" data-action="w-give">Give</button>
+        </div>
+        <div class="out mono" id="w-out" hidden></div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script type="module" nonce="__CSP_NONCE__">
+const API = "/apps/tessera/api";
+async function req(path, opts) {
+  opts = opts || {};
+  const headers = opts.body ? {'Content-Type': 'application/json'} : {};
+  const r = await fetch(API + path, {credentials: 'same-origin', ...opts, headers});
+  let data;
+  try { data = await r.json(); } catch { data = null; }
+  if (!r.ok) throw new Error((data && data.detail) || ('HTTP ' + r.status));
+  return data;
+}
+const post = (path, body) => req(path, {method: 'POST', body: JSON.stringify(body)});
+const el = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;').replace(/'/g, '&#39;').replace(/"/g, '&quot;');
+function toast(msg) { const t = el('toast'); t.textContent = msg; t.style.opacity = '1'; setTimeout(() => { t.style.opacity = '0'; }, 2600); }
+function status(ok) { const s = el('sta'); s.textContent = ok ? 'Online' : 'Error'; s.style.color = ok ? '#5eead4' : '#fca5a5'; }
+const box = (v, l) => '<div class="box"><div class="num">' + esc(v) + '</div><div class="lbl">' + esc(l) + '</div></div>';
+const run = (p, then) => p.then(then).catch(e => toast(e.message));
+const list = s => s.split(/[\s,]+/).map(x => x.trim()).filter(Boolean);
+const ranks = {galaxy: 'galaxies', star: 'stars', planet: 'planets', moon: 'moons', comet: 'comets'};
+const dur = s => s == null ? '' : s % 86400 === 0 ? (s / 86400) + 'd' : s % 3600 === 0 ? (s / 3600) + 'h' : s % 60 === 0 ? (s / 60) + 'm' : s + 's';
+// "30m", "1d", "90" (seconds) -> seconds; blank -> null
+function secs(v, what) {
+  v = v.trim();
+  if (v === '') return null;
+  const m = /^(\d+)\s*([smhd]?)$/.exec(v);
+  if (!m || +m[1] === 0) throw new Error(what + ': a length like 90, 30m, 12h or 1d');
+  return +m[1] * {'': 1, s: 1, m: 60, h: 3600, d: 86400}[m[2]];
+}
+function whole(v, what) {
+  v = v.trim();
+  if (v === '') return null;
+  if (!/^\d+$/.test(v)) throw new Error(what + ': a whole number');
+  return +v;
+}
+function when(v) {
+  if (v === '') return null;
+  const n = Math.floor(new Date(v).getTime() / 1000);
+  if (!(n > 0)) throw new Error('Expires: a date');
+  return n;
+}
+function localInput(unix) {
+  const d = new Date(unix * 1000);
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return d.toISOString().slice(0, 16);
+}
+
+document.querySelectorAll('#tabs .tab').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('#tabs .tab').forEach(x => x.classList.remove('on'));
+  document.querySelectorAll('.sec').forEach(s => s.classList.remove('on'));
+  b.classList.add('on');
+  el('sec-' + b.dataset.tab).classList.add('on');
+  ({ov: loadOverview, sv: loadServices, wl: loadWallet})[b.dataset.tab]();
+}));
+
+async function loadOverview() {
+  try {
+    const [o, s] = await Promise.all([req('/overview'), req('/services')]);
+    const svcs = s.services || [];
+    el('ov-stats').innerHTML =
+      box(svcs.filter(x => x.active).length + ' / ' + svcs.length, 'Services active') +
+      box(svcs.reduce((a, x) => a + x.issued, 0), 'Tokens issued') +
+      box(svcs.reduce((a, x) => a + x.redeemed, 0), 'Tokens used') +
+      box(o.spent, 'Spent, kept') +
+      box(o.quota_counts, 'Quota counts') +
+      box(o.held, 'Tokens held') +
+      box(o.pending, 'Requests out');
+    status(true);
+  } catch (e) { status(false); toast(e.message); }
+}
+
+function who(s) {
+  const g = [];
+  if (s.open) g.push('anyone');
+  if (s.keys.length) g.push(s.keys.length + ' key' + (s.keys.length === 1 ? '' : 's'));
+  if (s.ships.length) g.push(s.ships.length + ' ship' + (s.ships.length === 1 ? '' : 's'));
+  if (s.rank) g.push(ranks[s.rank] + ' and up');
+  return g.length ? g.join(', ') : 'this ship only';
+}
+
+function card(s) {
+  const n = esc(s.name);
+  const expired = s.expires != null && s.expires < Date.now() / 1000;
+  const f = (label, cls, value, hint, extra) => '<div class="fld"><label>' + label + '</label><input class="' + cls + '" value="' + esc(value) + '"' + (extra || '') + '>' + (hint ? '<div class="hint">' + hint + '</div>' : '') + '</div>';
+  return '<div class="svc" data-name="' + n + '">' +
+    '<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><div>' +
+      '<span class="nm">' + n + '</span>' +
+      '<span class="badge ' + (s.active && !expired ? 'b-on">active' : 'b-off">' + (expired ? 'expired' : 'inactive')) + '</span>' +
+      '<span class="badge b-gate">' + esc(who(s)) + '</span>' +
+      '<div>' + esc(s.title) + ' <span class="muted">' + esc(s.description) + '</span></div></div>' +
+      '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
+        (s.active ? '<button class="rbtn" data-action="deact">Deactivate</button>'
+                  : '<button class="rbtn" data-action="act">Activate</button><button class="rbtn" data-action="del">Delete</button>') +
+        '<button class="rbtn" data-action="edit">Edit</button><button class="rbtn" data-action="batch">Batch</button>' +
+      '</div></div>' +
+    '<div class="meta">' +
+      '<span>issued <b>' + s.issued + (s.max_issuance != null ? ' / ' + s.max_issuance : '') + '</b></span>' +
+      '<span>used <b>' + s.redeemed + '</b></span>' +
+      '<span>mode <b>' + esc(s.mode) + '</b></span>' +
+      (s.quota ? '<span>quota <b>' + s.quota.n + ' per ' + dur(s.quota.per) + '</b></span>' : '') +
+      (s.window ? '<span>tokens last <b>to the end of each ' + dur(s.window) + '</b></span>' : '') +
+      (s.expires != null ? '<span>' + (expired ? 'expired ' : 'expires ') + new Date(s.expires * 1000).toLocaleString() + '</span>' : '') +
+      '<span class="mono muted">/tessera/' + n + '</span>' +
+    '</div>' +
+    '<div class="edit" hidden>' +
+      '<div class="frow">' + f('Title', 'e-title', s.title) + f('Description', 'e-desc', s.description) + '</div>' +
+      '<div class="frow">' +
+        '<div class="fld"><label>Anyone may get tokens</label><select class="e-open"><option value="0"' + (s.open ? '' : ' selected') + '>no</option><option value="1"' + (s.open ? ' selected' : '') + '>yes</option></select></div>' +
+        '<div class="fld"><label>Or ships of rank</label><select class="e-rank">' +
+          ['', 'galaxy', 'star', 'planet', 'moon', 'comet'].map(r => '<option value="' + r + '"' + ((s.rank || '') === r ? ' selected' : '') + '>' + (r ? ranks[r] + ' and up' : 'none') + '</option>').join('') + '</select></div>' +
+        '<div class="fld"><label>Mode</label><select class="e-mode"><option value="burn"' + (s.mode === 'burn' ? ' selected' : '') + '>burn: a token is used once</option><option value="check"' + (s.mode === 'check' ? ' selected' : '') + '>check: a token can be shown again</option></select></div>' +
+      '</div>' +
+      '<div class="frow">' + f('Ships', 'e-ships', s.ships.join(' '), 'over Ames, space or comma separated') +
+        f('Client keys (Clear-auth)', 'e-keys', s.keys.join(' '), 'for web clients') + '</div>' +
+      '<div class="frow">' + f('Verifier ships', 'e-vers', s.verifiers.join(' '), 'may check or burn tokens they are shown') +
+        f('Verifier keys', 'e-vkeys', s.verifier_keys.join(' '), 'for resource servers on /redeem and /check') +
+        f('Agents', 'e-agents', s.agents.join(' '), 'on this ship, that a presented token may be delivered to') + '</div>' +
+      '<div class="frow">' +
+        f('Quota: tokens', 'e-qn', s.quota ? s.quota.n : '', 'per identity; blank for none') +
+        f('per', 'e-qper', s.quota ? dur(s.quota.per) : '', '30m, 12h, 1d') +
+        f('Tokens last to the end of each', 'e-win', dur(s.window), 'blank: for good; a change ends the tokens out') +
+        f('Max issued', 'e-max', s.max_issuance == null ? '' : s.max_issuance, 'blank: no cap') +
+        '<div class="fld"><label>Expires</label><input class="e-exp" type="datetime-local" value="' + (s.expires != null ? localInput(s.expires) : '') + '"></div>' +
+      '</div>' +
+      '<button class="btn" data-action="save">Save</button>' +
+    '</div>' +
+    '<div class="out mono" hidden></div>' +
+  '</div>';
+}
+
+async function loadServices() {
+  try {
+    const svcs = ((await req('/services')).services || []).sort((a, b) => a.name.localeCompare(b.name));
+    el('svc-list').innerHTML = svcs.length ? svcs.map(card).join('') : '<div class="empty">No services yet.</div>';
+    status(true);
+  } catch (e) { status(false); el('svc-list').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; }
+}
+
+function save(c) {
+  const q = cls => c.querySelector('.' + cls).value;
+  try {
+    const qn = whole(q('e-qn'), 'Quota'), per = secs(q('e-qper'), 'Quota per');
+    if ((qn == null) !== (per == null)) throw new Error('Quota: both a number and a length, or neither');
+    const body = {
+      name: c.dataset.name, title: q('e-title').trim(), description: q('e-desc'),
+      open: q('e-open') === '1', rank: q('e-rank') || null, mode: q('e-mode'),
+      ships: list(q('e-ships')), keys: list(q('e-keys')),
+      verifiers: list(q('e-vers')), verifier_keys: list(q('e-vkeys')), agents: list(q('e-agents')),
+      quota: qn == null ? null : {n: qn, per}, window: secs(q('e-win'), 'Window'),
+      max_issuance: whole(q('e-max'), 'Max issued'), expires: when(q('e-exp')),
+    };
+    run(post('/services/update', body), () => { toast('Saved'); loadServices(); });
+  } catch (e) { toast(e.message); }
+}
+
+function batch(c) {
+  const n = prompt('How many tokens to make (1-100)? They count toward the cap.', '10');
+  if (!n) return;
+  run(post('/services/batch', {name: c.dataset.name, n: +n}), d => {
+    const out = c.querySelector('.out');
+    out.hidden = false;
+    out.textContent = d.tokens.join('\n');
+    loadServices();
+  });
+}
+
+async function loadWallet() {
+  try {
+    const d = await req('/wallet');
+    const w = d.wallet || [], o = d.offers || [];
+    el('wl-list').innerHTML = (w.length
+      ? '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Issuer</th><th>Service</th><th>Tokens</th></tr></thead><tbody>' +
+        w.map(x => '<tr><td class="mono">' + esc(x.issuer) + '</td><td class="accent">' + esc(x.service) + '</td><td>' + x.count + '</td></tr>').join('') +
+        '</tbody></table></div>'
+      : '<div class="empty">No tokens held.</div>') +
+      (o.length
+      ? '<div class="ch" style="border:none;padding-left:0">Offered to this ship</div><div class="tbl-wrap"><table class="tbl"><thead><tr><th>From</th><th>Issuer</th><th>Service</th><th>Tokens</th><th></th></tr></thead><tbody>' +
+        o.map(x => '<tr data-from="' + esc(x.from) + '" data-issuer="' + esc(x.issuer) + '" data-service="' + esc(x.service) + '">' +
+          '<td class="mono">' + esc(x.from) + '</td><td class="mono">' + esc(x.issuer) + '</td><td class="accent">' + esc(x.service) + '</td><td>' + x.count + '</td>' +
+          '<td><button class="rbtn" data-action="w-accept">Accept</button> <button class="rbtn" data-action="w-decline">Decline</button></td></tr>').join('') +
+        '</tbody></table></div>'
+      : '');
+    status(true);
+  } catch (e) { status(false); el('wl-list').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; }
+}
+
+function wallet(act) {
+  const body = {issuer: el('w-issuer').value.trim(), service: el('w-svc').value.trim()};
+  try {
+    if (act === 'get' || act === 'give') body.n = +el('w-n').value;
+    if (act === 'give') body.to = el('w-to').value.trim();
+    if (act === 'use' && el('w-agent').value.trim()) {
+      body.agent = el('w-agent').value.trim();
+      const d = el('w-data').value.trim();
+      if (d) body.data = JSON.parse(d);
+    }
+  } catch (e) { toast('Data: ' + e.message); return; }
+  const out = el('w-out');
+  out.hidden = false;
+  out.textContent = act + '...';
+  post('/wallet/' + act, body)
+    .then(d => { out.textContent = JSON.stringify(d); loadWallet(); })
+    .catch(e => { out.textContent = e.message; });
+}
+
+const act = {
+  'refresh-ov': loadOverview, 'refresh-sv': loadServices, 'refresh-wl': loadWallet,
+  'prune': () => run(post('/prune', {}), () => { toast('Pruned'); loadOverview(); }),
+  'create': () => {
+    const name = el('new-name').value.trim(), title = el('new-title').value.trim();
+    if (!/^[a-z0-9_-]{1,64}$/.test(name)) { toast('Name: 1-64 of a-z, 0-9, _ and -'); return; }
+    if (!title) { toast('A title, please'); return; }
+    run(post('/services/create', {name, title}), () => { el('new-name').value = ''; el('new-title').value = ''; loadServices(); });
+  },
+  'edit': c => { const e = c.querySelector('.edit'); e.hidden = !e.hidden; },
+  'save': save,
+  'batch': batch,
+  'act': c => run(post('/services/activate', {name: c.dataset.name}), loadServices),
+  'deact': c => confirm('Deactivate ' + c.dataset.name + '? Its tokens stop working until it is back.') &&
+    run(post('/services/deactivate', {name: c.dataset.name}), loadServices),
+  'del': c => confirm('Delete ' + c.dataset.name + '? Only a service that never issued can go.') &&
+    run(post('/services/delete', {name: c.dataset.name}), loadServices),
+  'w-get': () => wallet('get'), 'w-use': () => wallet('use'), 'w-take': () => wallet('take'), 'w-give': () => wallet('give'),
+  'w-accept': b => offer('accept', b), 'w-decline': b => offer('decline', b),
+};
+// accept an offer (a refresh at its issuer) or decline it
+function offer(act, b) {
+  const r = b.closest('tr').dataset;
+  run(post('/wallet/' + act, {from: r.from, issuer: r.issuer, service: r.service}), d => { toast((act === 'accept' ? 'Accepted ' : 'Declined ') + d.done); loadWallet(); });
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-action]');
+  if (b && act[b.dataset.action]) act[b.dataset.action](b.closest('.svc') || b);
+});
+loadOverview();
+</script>
+</body>
+</html>

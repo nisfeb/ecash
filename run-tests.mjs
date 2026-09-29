@@ -7,7 +7,7 @@
 //   npm run test:all -- test-e2e test-p2pk      (just these)
 //
 // Needs: SHIP_URL and URBAUTH_COOKIE for a ship running %ecash and
-// %ecash-services. The Lightning suites start their own mock LNbits on
+// %tessera. The Lightning suites start their own mock LNbits on
 // MOCK_PORT (default 3338) and need the mint's Lightning backend to be
 // {type:"none"} (they could not restore a real backend's key). Suites that
 // change settings run only against a ship on this machine unless
@@ -34,9 +34,7 @@ const SUITES = [
   'test-melt-fee',
   'test-melt-pending',
   'test-conformance',
-  'test-cred',               // %ecash-services
-  'test-services',
-  'test-services-scope',
+  'test-tessera',            // %tessera (test-tessera-ships needs three ships: run it alone)
 ];
 
 if (!process.env.SHIP_URL || !process.env.URBAUTH_COOKIE) {

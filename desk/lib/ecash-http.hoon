@@ -1,8 +1,8 @@
 ::  /lib/ecash-http: HTTP and JSON plumbing shared by %ecash and
-::  %ecash-services.
+::  %tessera.
 ::
 ::    desk/lib holds the canonical copy; `make sync-libs` copies it to the
-::    services desk. Import-free, so the test desk builds it alone.
+::    other desks. Import-free, so the test desk builds it alone.
 ::
 |%
 ::  -- request caps --
@@ -215,7 +215,7 @@
   ^-  (list card:agent:gall)
   %:  give-http  eyre-id  204
     :~  ['Access-Control-Allow-Methods' 'GET, POST, OPTIONS']
-        ['Access-Control-Allow-Headers' 'Content-Type']
+        ['Access-Control-Allow-Headers' 'Content-Type, Clear-auth']
         ['Access-Control-Max-Age' '86400']
     ==
     ~

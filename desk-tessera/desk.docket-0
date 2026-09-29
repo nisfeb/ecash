@@ -1,0 +1,10 @@
+:~
+  title+'Tessera'
+  info+'Blind-signed access tokens: passes, credits and tickets that ships and web clients present'
+  color+0x14.b8a6
+  image+'/apps/tessera/icon'
+  version+[0 1 0]
+  website+'https://github.com/nisfeb/ecash'
+  license+'PolyForm Noncommercial 1.0.0'
+  site+/apps/tessera
+==

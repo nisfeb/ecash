@@ -1,6 +1,7 @@
 # Hoon testing
 
-The mint's rules are tested as Hoon unit suites on a separate test desk,
+The rules of the mint and of `%tessera` are tested as Hoon unit suites on
+a separate test desk,
 with [nisfeb/hoon-test-kit](https://github.com/nisfeb/hoon-test-kit)
 vendored at `scripts/hoon-test-kit/` (the version is in
 `scripts/hoon-test-kit/.kit-version`). The kit's `PLAYBOOK.md` is the
@@ -17,20 +18,23 @@ lives in libs and the agents keep only state and I/O:
 | `desk/lib/curve.hoon` | secp256k1 arithmetic, point encoding |
 | `desk/lib/bdhke.hoon` | hash-to-curve, BDHKE, DLEQ (NUT-12), BIP-340 verify (NUT-11), duplicate-x |
 | `desk/lib/ecash-http.hoon` | JSON and request parsing, CSRF, response headers, the dashboard CSP |
-| `desk/lib/ecash-rules.hoon` | keyset ids and caps, fees, proof checks, output checks, signing, P2PK, what a Lightning answer means, quote lifetimes |
-| `desk-services/lib/ecash-services-rules.hoon` | service names and caps, credential proof and output checks, credential signing |
+| `desk/lib/blind.hoon` | keys from entropy, NUT-02 keyset ids, signing a blinded message with its DLEQ proof, token checks |
+| `desk/lib/ecash-rules.hoon` | fees, proof checks, output checks, P2PK, what a Lightning answer means, quote lifetimes |
+| `desk-tessera/lib/tessera-rules.hoon` | authA tokens, token checks, refresh, who may mint (keys, ships, ranks), quotas, windows and rotation, pruning, a holder's blinding and unblinding, admin fields |
 
-Suites are `tests/lib/<lib>.hoon`, one per lib: 97 tests. Expected values
+Suites are `tests/lib/<lib>.hoon`, one per lib: 120 tests. Expected values
 come from outside the code under test wherever one exists: NUT-00's
 hash-to-curve vectors, BIP-340's test vectors (checked against noble),
-NUT-02 keyset ids computed by cashu-ts 4.5.1, a credential keyset id from
-`sha256sum`, and secp256k1's published multiples of G. Public keys in
-fixtures are precomputed with noble, so a fixture costs no scalar
-multiplication.
+NUT-02 keyset ids computed by cashu-ts (4.5.1 for units `sat`; 4.11 for
+`auth`, with and without `final_expiry`), an `authA` token as cashu-ts's
+`AuthManager` writes it, and secp256k1's published multiples of G. Public
+keys and signatures in fixtures are precomputed with noble, so a fixture
+costs no scalar multiplication.
 
 The JS suites at the repo root drive the agents over HTTP on a dev ship:
-that is the only layer that sees routing, auth, and the Lightning round
-trips. See the README's Testing section.
+that is the only layer that sees routing, auth, the Lightning round trips,
+and (`test-tessera-ships.mjs`, on three ships) Ames. See the README's
+Testing section.
 
 ## Running
 
@@ -128,6 +132,33 @@ The 8 survivors were 4 real gaps, two of them about key safety:
 
 Rechecked with `--only`: all 9 of those arms' mutants are killed.
 
+### Pass 3: `%tessera`'s rules (2026-09-28)
+
+All five operators over `tessera-rules`, in two runs as the phases landed.
+The first, over the HTTP issuer's arms: 95 mutants, 76 killed, 19 no-build,
+none survived. The second, over the arms for ships, windows and pruning: 36
+mutants, 27 killed, 9 no-build, none survived. A third, after a review
+added offers and forward agents (`+offer-refusal`, `+forward-refusal`,
+`+apply-fields`): 17 mutants, 15 killed, 2 no-build, none survived. The
+no-builds are the expected `?.`↔`?:` flips after a `?=` or a `?~`.
+
+The first run also mutated `ecash-services-rules`' arms of the same names:
+4 survivors in `+valid-service-name` (a one-letter name, and the characters
+just outside `a-z`). That lib has since been retired with `%ecash-services`.
+
+The agent's own guards are proven on dev ships instead, by breaking each one
+and watching `test-tessera-ships.mjs` fail: the quota count (5 checks fail),
+the un-burn of a token whose forward was refused (2), the verifier check
+(1), and giving a refused token back to the holder (4). The forward-agent
+checks and holding hand-overs as offers each have a check that fails
+without them (a present to an agent outside the list, or to one that isn't
+running; an offer that is not yet held). The check that only
+the asked ship may answer a request is not reachable from HTTP. On
+2026-09-28 it was proven live: ~mus asked ~lyd for 10 tokens while ~del
+answered the same request id first. With the check, ~mus stored the 10;
+without it, it stored none. `+whom`, the ship an answer must come from, is
+unit-tested.
+
 ## Traps met here
 
 - **`?=` takes a wing.** `?=(%& -:(f x))` doesn't build; bind the result
@@ -145,3 +176,17 @@ Rechecked with `--only`: all 9 of those arms' mutants are killed.
   under 108 bytes. Point the kit at a short symlink.
 - **`b64-hex`'s test prints `%base-64-padding-err-one`** on the ship: that
   is `de:base64` refusing the non-base64 case, as intended.
+- **The kit's `expect-eq` checks types too**: the actual must nest in the
+  expected. A constant tuple like `!>(['x' '' & ...])` fails against a
+  `service`; cast it (`` !>(`service`[...]) ``).
+- **`x(field v)` changes the field's type**, not just its value. A list
+  of `svc(name 'p')`, `svc(name 'o')` has the first one's constant type, so
+  `malt` of it fails; cast the list. `%*(. arm policy [...])` loses the
+  faces inside: cast the new value (`` `policy`[...] ``).
+- **`(gulf 1 0)` crashes**: `gulf` asserts its bounds. A count of 0 needs
+  its own case.
+- **`(~(gut by o) k b+x)` forks without faces**, so `p.v` doesn't resolve
+  after a `?=`: cast the default to `json`.
+- **An arm named `roll` shadows the stdlib fold** in everything that
+  imports the lib.
+- **`(slav %f t)` is a bare atom**, not a loobean: compare it with `&`.

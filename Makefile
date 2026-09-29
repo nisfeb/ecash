@@ -1,7 +1,7 @@
 # ecash mint — development helpers
 #
 # Tests: `npm install` once, then point them at a ship running %ecash and
-# %ecash-services (run-tests.mjs says what each suite needs):
+# %tessera (run-tests.mjs says what each suite needs):
 #   SHIP_URL=http://localhost:8080 URBAUTH_COOKIE='urbauth-~zod=0v…' make test
 #   make test-p2pk           (one suite: npm run test:p2pk)
 # The Lightning suites start their own mock LNbits; `make mock-lnbits` runs
@@ -9,12 +9,13 @@
 
 .PHONY: test mock-lnbits install deploy sync-libs hoon-test
 
-# Shared crypto: desk/lib is the single source of truth; regenerate the
-# %ecash-services copies from it (they are gitignored). Run before building
-# the %ecash-services desk.
+# Shared libs: desk/lib is the single source of truth; regenerate the
+# other desks' copies from it (they are gitignored). build.sh runs this.
 sync-libs:
-	mkdir -p desk-services/lib
-	cp desk/lib/curve.hoon desk/lib/bdhke.hoon desk/lib/ecash-http.hoon desk-services/lib/
+	mkdir -p desk-tessera/lib desk-tessera/mar desk-tessera/sur
+	cp desk/lib/curve.hoon desk/lib/bdhke.hoon desk/lib/ecash-http.hoon desk/lib/blind.hoon desk/lib/docket.hoon desk-tessera/lib/
+	cp desk/mar/docket-0.hoon desk/mar/txt.hoon desk-tessera/mar/
+	cp desk/sur/docket.hoon desk-tessera/sur/
 
 # Every release-gating suite (npm run test:all), or one: make test-<suite>
 test:
@@ -31,14 +32,14 @@ mock-lnbits:
 install:
 	npm install
 
-# Build both desks and copy them into mounted desks, then |commit each in
+# Build the desks and copy them into mounted desks, then |commit each in
 # the ship's dojo. build.sh brings the base-dev deps and wipes the target,
 # refusing a directory with no sys.kelvin:
 #   make deploy PIER=/path/to/pier
 deploy:
 	@test -n "$(PIER)" || { echo "usage: make deploy PIER=/path/to/pier" >&2; exit 1; }
 	./build.sh -p $(PIER)/ecash
-	./build.sh services -p $(PIER)/ecash-services
+	./build.sh tessera -p $(PIER)/tessera
 
 # Hoon unit suites on a fake ship's %ecash-test desk (see docs/hoon-testing.md)
 hoon-test:

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="Tessera">
+  <rect width="256" height="256" rx="60" fill="#0f766e"/>
+  <path d="M52 86 h152 a10 10 0 0 1 10 10 v18 a18 18 0 0 0 0 28 v18 a10 10 0 0 1 -10 10 h-152 a10 10 0 0 1 -10 -10 v-18 a18 18 0 0 0 0 -28 v-18 a10 10 0 0 1 10 -10 z" fill="#ffffff"/>
+  <path d="M168 94 v68" stroke="#0f766e" stroke-width="5" stroke-dasharray="8 7"/>
+  <circle cx="108" cy="128" r="18" fill="none" stroke="#0f766e" stroke-width="9"/>
+</svg>

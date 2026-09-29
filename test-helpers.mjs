@@ -137,11 +137,9 @@ export async function call(path, { method = 'GET', body, auth = false, headers =
 }
 export const get = (path) => call(path);
 export const post = (path, body) => call(path, { method: 'POST', body });
-// admin / svcAdmin: the %ecash / %ecash-services admin API; a body makes it a POST
+// admin: the %ecash admin API; a body makes it a POST
 export const admin = (path, body) =>
   call(`/apps/ecash/admin/api${path}`, { method: body === undefined ? 'GET' : 'POST', body, auth: true });
-export const svcAdmin = (path, body) =>
-  call(`/apps/ecash-services/admin/api${path}`, { method: body === undefined ? 'GET' : 'POST', body, auth: true });
 
 export async function setSelf(on) {
   const r = await admin('/settings', { self_method_enabled: on });

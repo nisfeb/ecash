@@ -2,10 +2,10 @@
 
 # Build the ecash desks and (optionally) copy them into a mounted desk.
 #
-#   ./build.sh                          build both desks into dist/ and dist-services/
+#   ./build.sh                          build the desks into dist/ and dist-tessera/
 #   ./build.sh -p <pier>/ecash          build, then deploy the %ecash mint desk
-#   ./build.sh services -p <pier>/ecash-services   build, then deploy %ecash-services
-#   ./build.sh clean                    remove dist/ and dist-services/
+#   ./build.sh tessera -p <pier>/tessera   build, then deploy %tessera
+#   ./build.sh clean                    remove the dist dirs
 #
 # Requires peru (https://github.com/buildinspace/peru) to pull the shared
 # base-dev dependencies (default-agent, dbug, the standard marks).
@@ -47,8 +47,8 @@ check_peru_installed() {
   fi
 }
 
-# Build both desks: dist/ = %ecash (value mint), dist-services/ = %ecash-services
-# (access layer). peru.yaml imports the shared base-dev files into both.
+# Build the desks: dist/ = %ecash (value mint), dist-tessera/ = %tessera
+# (access tokens). peru.yaml imports the shared base-dev files into each.
 sync_deps() {
   check_peru_installed
 
@@ -57,14 +57,13 @@ sync_deps() {
     exit 1
   fi
 
-  # Regenerate the shared crypto for the services desk (single source of truth
+  # Regenerate the shared libs for the other desks (single source of truth
   # is desk/lib; these copies are gitignored).
-  mkdir -p desk-services/lib
-  cp desk/lib/curve.hoon desk/lib/bdhke.hoon desk/lib/ecash-http.hoon desk-services/lib/
+  make -s sync-libs
 
-  echo "Preparing dist/ and dist-services/..."
-  rm -rf dist dist-services
-  mkdir -p dist dist-services
+  echo "Preparing dist/ and dist-tessera/..."
+  rm -rf dist dist-tessera
+  mkdir -p dist dist-tessera
 
   # Pull base-dev deps FIRST, into the empty dirs, so peru only ever manages its
   # own files — otherwise a mark we also ship (mar/txt) looks "modified" to peru
@@ -72,16 +71,14 @@ sync_deps() {
   echo "Running peru sync..."
   if ! peru sync 2>&1; then
     echo "Error: peru sync failed. Cleaning up..." >&2
-    rm -rf dist dist-services
+    rm -rf dist dist-tessera
     exit 1
   fi
 
   # ...then overlay our desk files on top (ours win for any shared mark).
   echo "Overlaying desk files..."
   cp -r desk/* dist/
-  if [[ -d desk-services ]]; then
-    cp -r desk-services/* dist-services/
-  fi
+  cp -r desk-tessera/* dist-tessera/
 }
 
 copy_to_path() {
@@ -116,53 +113,47 @@ copy_to_path() {
 
 build() {
   sync_deps
-  echo "Build completed (dist/ = %ecash, dist-services/ = %ecash-services)."
+  echo "Build completed (dist/ = %ecash, dist-tessera/ = %tessera)."
   if [[ -n "$COPY_PATH" ]]; then
     copy_to_path "$COPY_PATH" dist
   fi
 }
 
-build_services() {
+build_tessera() {
   sync_deps
-  echo "Build completed (dist-services/ = %ecash-services)."
+  echo "Build completed (dist-tessera/ = %tessera)."
   if [[ -n "$COPY_PATH" ]]; then
-    copy_to_path "$COPY_PATH" dist-services
+    copy_to_path "$COPY_PATH" dist-tessera
   fi
 }
 
 clean() {
-  if [[ -d dist ]]; then
-    echo "Removing dist directory..."
-    rm -rf dist
-  fi
-  if [[ -d dist-services ]]; then
-    echo "Removing dist-services directory..."
-    rm -rf dist-services
-  fi
+  echo "Removing the dist directories..."
+  rm -rf dist dist-tessera
 }
 
 case "$COMMAND" in
   build)
     build
     ;;
-  services)
-    build_services
+  tessera)
+    build_tessera
     ;;
   clean)
     clean
     ;;
   help)
-    echo "Usage: $0 [-p path] [build|services|clean|help]"
+    echo "Usage: $0 [-p path] [build|tessera|clean|help]"
     echo
-    echo "  build      : build both desks (dist/ = %ecash, dist-services/ = %ecash-services)"
-    echo "  services   : same build; with -p, deploy the %ecash-services desk"
-    echo "  clean      : remove dist/ and dist-services/"
+    echo "  build      : build the desks (dist/ = %ecash, dist-tessera/ = %tessera)"
+    echo "  tessera    : same build; with -p, deploy the %tessera desk"
+    echo "  clean      : remove the dist directories"
     echo
     echo "Options:"
     echo "  -p path    : after building, copy the desk into the mounted desk at this path"
     echo "               (removes existing contents of that desk first)"
     echo "                 build    + -p  ->  copies dist/ (%ecash)"
-    echo "                 services + -p  ->  copies dist-services/ (%ecash-services)"
+    echo "                 tessera  + -p  ->  copies dist-tessera/ (%tessera)"
     echo
     echo "  If no command is given, build is the default."
     echo "  peru must be installed: https://github.com/buildinspace/peru"

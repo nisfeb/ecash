@@ -31,11 +31,11 @@ verify**.
 ```bash
 git clone https://github.com/nisfeb/ecash
 cd ecash
-./build.sh              # builds dist/ (%ecash) and dist-services/ (%ecash-services)
+./build.sh              # builds dist/ (%ecash) and dist-tessera/ (%tessera)
 ```
 
 `build.sh` pulls the base-dev files with peru and copies the shared libraries (`curve`, `bdhke`,
-`ecash-http`) into the services desk, producing two complete desks. Always deploy with
+`ecash-http`, `blind`) into the tessera desk, producing complete desks. Always deploy with
 `build.sh`; copying `desk/` by hand leaves out the base-dev files.
 
 **The value mint (`%ecash`)**, in the ship's dojo:
@@ -53,18 +53,18 @@ cd ecash
 |install our %ecash
 ```
 
-**The credentials/services layer (`%ecash-services`)**, optional (zero-value access tokens):
+**Access tokens (`%tessera`)**, optional (no value; see [`tessera.md`](tessera.md)):
 
 ```
-|new-desk %ecash-services
-|mount %ecash-services
+|new-desk %tessera
+|mount %tessera
 ```
 ```bash
-./build.sh services -p /path/to/your/pier/ecash-services
+./build.sh tessera -p /path/to/your/pier/tessera
 ```
 ```
-|commit %ecash-services
-|install our %ecash-services
+|commit %tessera
+|install our %tessera
 ```
 
 `build.sh -p` refuses a path without a `sys.kelvin` (so it only ever wipes a mounted desk). On

@@ -1,8 +1,8 @@
 # Operator Runbook: %ecash mint
 
-Operating the Urbit Cashu mint: the **`%ecash`** value mint and the **`%ecash-services`**
-zero-value access agent. Written against the source at `%ecash` state 15 and `%ecash-services`
-state 1.
+Operating the Urbit Cashu mint, the **`%ecash`** value mint. Written against the source at
+`%ecash` state 15. The access-token desk, `%tessera`, has its own guide:
+[`tessera.md`](tessera.md).
 
 > This mint handles real value. Read §3 (melt safety) and §10 (backup) before you point it at a
 > funded Lightning wallet. The most dangerous operator action is a **force-abort** of a melt
@@ -37,10 +37,10 @@ state 1.
   melt, checkstate, restore). A few legacy public GETs under `/apps/ecash`: `/apps/ecash`
   (status), `/apps/ecash/keysets`, `/apps/ecash/keysets/active`, `/apps/ecash/info`,
   `/apps/ecash/icon`. Admin at `/apps/ecash/admin` (dashboard) and `/apps/ecash/admin/api/*`.
-- **`%ecash-services`**, zero-value credentials and access control. Public `/cred/v1/*` and
-  `/services/v1/*`; admin at `/apps/ecash-services/admin` and `/apps/ecash-services/admin/api/*`.
-- Shared libraries (`curve`, `bdhke`, `ecash-http`) live in `desk/lib`. `build.sh` (or
-  `make sync-libs`) copies them into `desk-services/lib`, where they are gitignored. **Edit them
+- **`%tessera`**, access tokens (no value): `/tessera/<service>/*`, Ames pokes, admin at
+  `/apps/tessera`. See [`tessera.md`](tessera.md).
+- Shared libraries (`curve`, `bdhke`, `ecash-http`, `blind`) live in `desk/lib`. `build.sh` (or
+  `make sync-libs`) copies them into `desk-tessera/lib`, where they are gitignored. **Edit them
   in `desk/lib` only.** The mint's rules are in `desk/lib/ecash-rules.hoon`.
 - Mint/melt methods: **`bolt11`** (Lightning) and **`self`** (no payment; test mints only, §2).
 
@@ -253,17 +253,7 @@ Base `/apps/ecash/admin/api`. Session cookie required; POSTs also pass the same-
 
 The dashboard asks for a typed confirmation before revoking a PAID quote or force-aborting.
 
-**`%ecash-services`** (`/apps/ecash-services/admin/api/*`, same auth): `cred/overview` (each
-keyset with `service_scoped` and `service`); `cred/keysets/generate|activate|deactivate` (the
-last two refuse service keysets: `keyset-is-service-scoped`); `services`, `services/{name}`;
-`services/create|update|activate|deactivate|delete`; `services/allowlist/add|remove`.
-`services/delete` needs the service inactive and `issued == 0` (`issued` never decreases), and
-deactivates its keyset. `expires` and `max_issuance` must be `null` (clear) or a bare
-non-negative integer (`invalid-expires`, `invalid-max-issuance`); on update, an absent field is
-left alone. Service names are 1–64 of `a-z 0-9 _ -`, not `list`.
-
-**`/cred/v1/*` is public**: anyone can issue on an active plain credential keyset. Access control
-belongs in a service's allowlist.
+`%tessera`'s admin API is in [`tessera.md`](tessera.md#admin-api).
 
 ---
 
@@ -320,10 +310,6 @@ Unauthenticated by protocol design.
   copied keys would let anyone relabel a token to the cheaper id. If the old keyset was active
   the new one is; otherwise the new one is inactive. The same fee again is a no-op.
 - There is no "deactivate the active keyset": activate a replacement.
-- **`%ecash-services`:** a service's keyset is service-scoped. It is used only through
-  `/services/v1/{name}/*` (never `/cred/v1`), can't be activated or deactivated through the cred
-  admin, and is deactivated when its service is deleted. Its public key is still fetchable by id,
-  which is harmless. Keysets from `cred/keysets/generate` are plain and publicly usable.
 
 ---
 
@@ -377,14 +363,13 @@ unit.**
 `on-load` migrates forward only: `%ecash` 13 → 14 (adds the NUT-09 `restore` map, empty) → 15
 (adds the overpayment to each inflight melt, recorded as 0). **It loads state 13 or later.** A
 mint below 13 must first upgrade through commit `eb7b56a`: build and commit that commit's desk,
-let it load, then upgrade to current. `%ecash-services` migrates 0 → 1, and on every load
-deactivates the keysets of deleted services. Migrations can't be reversed: older code can't
-load newer state.
+let it load, then upgrade to current. Migrations can't be reversed: older code can't load newer
+state.
 
 Procedure:
 1. **Back up the pier** (§10).
-2. Build and deploy with `build.sh` (it regenerates the services desk's shared libraries):
-   `./build.sh -p <pier>/ecash`, and `./build.sh services -p <pier>/ecash-services` if you run it.
+2. Build and deploy with `build.sh` (it regenerates the tessera desk's shared libraries):
+   `./build.sh -p <pier>/ecash`, and `./build.sh tessera -p <pier>/tessera` if you run it.
 3. `|commit` each desk and watch the load.
 4. **Verify:** `/overview` counters look right, `/v1/info` answers, the active keyset is
    unchanged. Resolve any melt that was in flight across the upgrade (§4).
@@ -408,7 +393,7 @@ There is no metrics endpoint: the signals are `GET /overview`, `GET /quotes` and
 - **Disk and event log:** `du -sh <pier>/.urb/log` and `df`. The log grows fast under load and
   can fill the disk and wedge the ship (§16).
 - **Bind failures:** if eyre refuses a binding, the agent prints `%ecash-bind-failed` (or
-  `%ecash-services-bind-failed`) to the console and that API is offline. Probe `/v1/info`
+  `%tessera-bind-failed`) to the console and that API is offline. Probe `/v1/info`
   from outside.
 - **Melt traces** worth alerting on: `%ecash-ln-pay-dispatched-pending`,
   `%ecash-ln-pay-dispatch-rejected`, `%ecash-melt-confirmed-failed`, `%ecash-melt-abort-rollback`.
@@ -514,7 +499,7 @@ Hardened across several adversarial audits:
 ## 18. Appendix: install, tests, quirks
 
 **Install.** See [`INSTALL.md`](INSTALL.md). Always deploy with `build.sh -p` (it adds the
-base-dev files and the services desk's shared libraries); don't copy `desk/` by hand. The
+base-dev files and the tessera desk's shared libraries); don't copy `desk/` by hand. The
 Lightning backend can also be set from the dojo (host only):
 `:ecash [%lnbits 'https://…' 'api-key']`, `:ecash [%lnd 'https://…' 'macaroon']`,
 `:ecash [%none ~]`.

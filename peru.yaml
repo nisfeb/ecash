@@ -1,7 +1,7 @@
 imports:
   base-dev:
     - ./dist
-    - ./dist-services
+    - ./dist-tessera
 
 git module base-dev:
   url:    https://github.com/urbit/urbit

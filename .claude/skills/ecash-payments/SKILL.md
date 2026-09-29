@@ -464,12 +464,15 @@ Bind a path with eyre and read the same `{"proofs": [...]}` body. A public calle
 identity you can trust, so key the whitelist on something the caller proves (a session or
 account you issue), not on `src.bowl`.
 
-### Access tokens instead of sats (`%ecash-services`)
+### Access tokens instead of sats (`%tessera`)
 
-If you gate access with zero-value service tokens rather than payments, redeem them with
-`POST /services/v1/{name}/redeem`. **Grant access only when a token's `status` is `"fresh"`.**
-The endpoint answers 200 with `"replay"` for a token that was already redeemed, possibly by
-someone else.
+To gate access with tokens that carry no value, use `%tessera` instead of payments. An agent on
+the issuing ship doesn't handle tokens at all: `%tessera` burns a presented token and pokes the
+agent with `%tessera-granted` `[svc who data]` (the service must list the agent in its
+`agents`), and the agent trusts it only when `=(/gall/tessera sap.bowl)`. An HTTP resource server redeems with
+`POST /tessera/{name}/redeem` `{token, key}`. **Grant access only when `status` is `"fresh"`.**
+It answers 200 with `"replay"` for a token already spent, possibly by someone else. See
+`docs/tessera.md` ("Gating an app").
 
 ---
 

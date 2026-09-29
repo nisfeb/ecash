@@ -2,7 +2,7 @@
 .peru
 dist
 dist-dev
-dist-services
+dist-tessera
 
 # urbit
 zod
@@ -19,8 +19,13 @@ node_modules
 .env
 .mcp.json
 
-# generated: shared crypto for %ecash-services (canonical lives in desk/lib;
-# run `make sync-libs` to regenerate). Keeps a single source of truth.
-desk-services/lib/curve.hoon
-desk-services/lib/bdhke.hoon
-desk-services/lib/ecash-http.hoon
+# generated: the shared libs' copies (canonical lives in desk/lib; run
+# `make sync-libs` to regenerate). Keeps a single source of truth.
+desk-tessera/lib/curve.hoon
+desk-tessera/lib/bdhke.hoon
+desk-tessera/lib/ecash-http.hoon
+desk-tessera/lib/blind.hoon
+desk-tessera/lib/docket.hoon
+desk-tessera/mar/docket-0.hoon
+desk-tessera/mar/txt.hoon
+desk-tessera/sur/docket.hoon

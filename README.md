@@ -13,12 +13,10 @@ state in the ship's event log. The elliptic-curve math for BDHKE, DLEQ and hash-
 **pure Hoon** (`lib/curve.hoon`, `lib/bdhke.hoon`), with no jets. P2PK signature checks use
 zuse's BIP-340 verify, which the runtime jets.
 
-Beyond standard Cashu there are two extensions for tokens that carry no value, in a separate
-agent, `%ecash-services`:
-
-- **Credential tokens**: raw `/cred/v1` endpoints for zero-value blind-signed tokens.
-- **Services**: named access scopes, each with its own keyset, optional expiry, issuance cap and
-  API-key allowlist.
+Next to the mint, a second desk, **`%tessera`**, issues **access tokens** rather than money:
+passes, credits, tickets and invites, as Cashu NUT-22 blind auth tokens. Each service is its
+own auth mint that a cashu-ts `AuthManager` works against, and ships get, present, check and
+hand over tokens over Ames. See [`docs/tessera.md`](docs/tessera.md).
 
 ## Supported NUTs
 
@@ -40,8 +38,8 @@ agent, `%ecash-services`:
 
 ## Project structure
 
-The mint and the access layer are **two Gall agents on two desks**. They share the crypto and
-HTTP libraries, whose single source is `desk/lib`.
+The mint and the access tokens are **two Gall agents on two desks**. They share the crypto,
+blind-signature and HTTP libraries, whose single source is `desk/lib`.
 
 ```
 desk/                      installs as %ecash (the value mint)
@@ -49,15 +47,16 @@ desk/                      installs as %ecash (the value mint)
   app/dashboard.txt        admin dashboard HTML/JS
   sur/ecash.hoon           shared types (keyset, quotes, ln-backend, ...)
   lib/ecash-rules.hoon     the mint's rules as pure arms (checks, signing, P2PK, Lightning answers)
+  lib/blind.hoon           keys, keyset ids, signing with DLEQ, token checks (shared)
   lib/ecash-http.hoon      HTTP/JSON plumbing and request caps          (shared)
   lib/bdhke.hoon           BDHKE, hash-to-curve, DLEQ, BIP-340 verify    (shared)
   lib/curve.hoon           secp256k1 point arithmetic                    (shared)
-desk-services/             installs as %ecash-services (credentials and services, no value)
-  app/ecash-services.hoon  agent: /cred/v1/*, /services/v1/*, /apps/ecash-services/admin
-  lib/ecash-services-rules.hoon
-  sur/ecash-services.hoon
-  lib/{curve,bdhke,ecash-http}.hoon   copied from desk/lib by build.sh or `make sync-libs`
-                                      (gitignored)
+desk-tessera/              installs as %tessera (access tokens, no value)
+  app/tessera.hoon         agent: /tessera/<service>/*, Ames pokes, /apps/tessera
+  app/tessera-demo.hoon    a guestbook gated by tokens: the integration example
+  lib/tessera-rules.hoon   its rules as pure arms
+  sur/tessera.hoon, mar/tessera/action.hoon
+  lib/, mar/ shared files  copied from desk/ by build.sh or `make sync-libs` (gitignored)
 tests/lib/*.hoon           Hoon unit suites (see docs/hoon-testing.md)
 test-*.mjs, run-tests.mjs  JS suites against a running ship
 mock-lnbits.mjs            mock LNbits for the Lightning suites and the demo
@@ -65,12 +64,12 @@ mock-lnbits.mjs            mock LNbits for the Lightning suites and the demo
 
 ## Installation
 
-Build both desks (requires [peru](https://github.com/buildinspace/peru)), then install on your
+Build the desks (requires [peru](https://github.com/buildinspace/peru)), then install on your
 ship. The desks declare `[%zuse 408]`.
 
 ```bash
 git clone https://github.com/nisfeb/ecash && cd ecash
-./build.sh          # builds dist/ (%ecash) and dist-services/ (%ecash-services)
+./build.sh          # builds dist/ (%ecash) and dist-tessera/ (%tessera)
 ```
 
 In the dojo, create and mount the desk; then deploy the built desk into the mount and commit:
@@ -90,19 +89,8 @@ In the dojo, create and mount the desk; then deploy the built desk into the moun
 On first install the mint generates a keyset with 21 denominations (1, 2, 4, … 2^20 sats), sets
 Lightning to `none` and leaves the free `self` method off, so it is inert until you configure it.
 
-To also run the credentials/services layer, install **`%ecash-services`** the same way:
-
-```
-|new-desk %ecash-services
-|mount %ecash-services
-```
-```bash
-./build.sh services -p /path/to/your/pier/ecash-services
-```
-```
-|commit %ecash-services
-|install our %ecash-services
-```
+To also issue access tokens, install **`%tessera`** the same way (`./build.sh tessera -p
+<pier>/tessera`); see [`docs/tessera.md`](docs/tessera.md).
 
 **Running a public mint?** Read [`docs/INSTALL.md`](docs/INSTALL.md) (HTTPS, reverse proxy, rate
 limiting, Lightning, pre-production checks) and
@@ -282,7 +270,7 @@ settings), Keysets (generate, activate, deactivate, set fee), Quotes (delete, re
 force-abort stuck melts), Tokens (spent lookups), Lightning (configure, test) and Info (NUT-06
 name and description). Its CSP runs only its own nonce'd script and allows no form posts.
 
-Credentials and services have their own dashboard at `/apps/ecash-services/admin`.
+`%tessera` has its own dashboard at `/apps/tessera`.
 
 ## Admin API (`%ecash`)
 
@@ -319,161 +307,11 @@ never mint it. Only do that after refunding them some other way.
 
 ---
 
-## Credential tokens (`%ecash-services`)
+## Access tokens (`%tessera`)
 
-Zero-value blind-signed tokens that act as access credentials. This is a non-standard extension;
-it does not touch `/v1/*`.
-
-- Credential keysets are separate from value keysets. Their ids start `c0` (value keysets `01`).
-- Every output must carry `"amount": 0`, exactly the number 0.
-- Credentials have their own spent set, per keyset.
-- Same BDHKE and DLEQ as value tokens.
-
-### Endpoints
-
-**`/cred/v1/*` is public.** Anyone can issue credentials on any active plain credential keyset,
-so a plain keyset is not access control. To control who can get tokens, use a **service** with
-an allowlist (below).
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/cred/v1/keys` | Active plain (non-service) keysets with keys |
-| GET | `/cred/v1/keys/{keyset_id}` | Any credential keyset's public key, service keysets included |
-| GET | `/cred/v1/keysets` | Plain keysets' ids and active flags |
-| POST | `/cred/v1/issue` | Blind-sign outputs `{outputs: [{B_, amount: 0, id}]}` |
-| POST | `/cred/v1/verify` | Check proofs without spending → `{valid: [{secret, valid, spent}]}` |
-| POST | `/cred/v1/redeem` | Verify and spend every proof, or none → `{redeemed: [{secret, redeemed}]}` |
-
-`issue` answers 200 with one entry per output: a signature, or `{"error": "<code>"}` for an output
-it could not sign (`credential-amount-must-be-zero`, `missing-B_`, `invalid-B_-point`,
-`missing-keyset-id`, `unknown-credential-keyset`, `credential-keyset-inactive`). `redeem` refuses
-the whole batch with a 400: `invalid-credential` (bad signature, unknown or service keyset,
-secret over 2048 bytes), `duplicate-credential`, `credential-already-spent`. On every POST, a
-missing or empty array is `400 missing-outputs` / `empty-outputs` (or `-proofs`); on `issue`, two
-outputs with one x-coordinate are `400 duplicate-output`.
-
-### Flow
-
-```
-POST /apps/ecash-services/admin/api/cred/keysets/generate      (admin)
-→ {"id": "c0…", "active": true, "keys": {"0": "02…"}}
-
-POST /cred/v1/issue    {"outputs": [{"B_": "02…", "amount": 0, "id": "c0…"}]}
-→ {"signatures": [{"C_": "02…", "amount": 0, "id": "c0…", "dleq": {…}}]}
-# unblind client-side: C = C_ − r·K
-
-POST /cred/v1/verify   {"proofs": [{"C": "02…", "secret": "…", "amount": 0, "id": "c0…"}]}
-→ {"valid": [{"secret": "…", "valid": true, "spent": false}]}
-
-POST /cred/v1/redeem   {"proofs": [...]}
-→ {"redeemed": [{"secret": "…", "redeemed": true}]}
-```
-
----
-
-## Services (access control)
-
-A **service** is a named scope with its own dedicated credential keyset, made when the service
-is created and never shared. A token signed for `chat` does not verify for `vip`.
-
-| Field | Meaning |
-|---|---|
-| `name` | URL slug: 1–64 of `a-z 0-9 _ -`, not `list` |
-| `title`, `description` | Display text |
-| `kind` | `single-use` (the only kind) |
-| `ks_id` | The service's keyset id |
-| `active` | If false, issue/verify/redeem answer `400 service-inactive` |
-| `expires` | Optional cutoff, unix seconds. After it: `400 service-expired` |
-| `max_issuance` | Optional cap on tokens ever issued |
-| `issued`, `redeemed` | Counters |
-| `allowlist` | API keys. Empty: anyone can issue. Non-empty: `issue` needs a matching `access_key` |
-
-### Public endpoints
-
-| Method | Path | Description |
-|---|---|---|
-| GET | `/services/v1/list` | Active services (no allowlist keys, only `allowlist_count` and `allowlist_required`) |
-| GET | `/services/v1/{name}` | One service; 404 if unknown, inactive or expired |
-| POST | `/services/v1/{name}/issue` | `{access_key?, outputs: [{B_, amount: 0}]}` → `{signatures}`. Signs with the service's keyset whatever `id` an output names |
-| POST | `/services/v1/{name}/verify` | `{proofs}` → `{results: [{secret, valid, spent}]}` |
-| POST | `/services/v1/{name}/redeem` | `{proofs}` → `{redeemed: [{secret, status}]}` |
-
-`issue`, `verify` and `redeem` on an unknown service answer `404 service-not-found`. `verify` and
-`redeem` are never allowlist-gated: anyone holding a valid token can use it.
-
-### Redeem: grant access only on `fresh`
-
-- All proofs valid: 200, and each gets its own `status`: `fresh` (it was unspent and is spent
-  now) or `replay` (it was already spent; nothing changes).
-- Any invalid proof (bad signature, another service's keyset): `400 invalid-service-token` for
-  the whole batch.
-
-**Grant access only for `status: "fresh"`.** `replay` means the token was redeemed before,
-possibly by someone else; do not treat a 200 as acceptance. A retry after a lost answer also
-sees `replay`, and can't tell whether its own first attempt or someone else spent the token.
-
-### Allowlist
-
-```bash
-# create a service and give one client a key (admin, cookie-authenticated):
-curl -X POST http://localhost:8080/apps/ecash-services/admin/api/services/create \
-  -H "Cookie: urbauth-~zod=…" -H "Content-Type: application/json" \
-  -d '{"name": "vip", "title": "VIP", "description": "Paid tier"}'
-curl -X POST http://localhost:8080/apps/ecash-services/admin/api/services/allowlist/add \
-  -H "Cookie: urbauth-~zod=…" -H "Content-Type: application/json" \
-  -d '{"name": "vip", "key": "bus-secret-xyz"}'
-
-# the client issues with its key (no cookie):
-curl -X POST http://localhost:8080/services/v1/vip/issue -H "Content-Type: application/json" \
-  -d '{"access_key": "bus-secret-xyz", "outputs": [{"B_": "02…", "amount": 0}]}'
-
-# anyone holding a token redeems it:
-curl -X POST http://localhost:8080/services/v1/vip/redeem -H "Content-Type: application/json" \
-  -d '{"proofs": [{"C": "02…", "secret": "…", "amount": 0, "id": "c0…"}]}'
-```
-
-### Admin API (`%ecash-services`)
-
-Base path `/apps/ecash-services/admin/api`, same cookie and same-origin rules as the mint's.
-
-| Method | Path | Body | Description |
-|---|---|---|---|
-| GET | `/cred/overview` | — | Counts, and each keyset's `id`, `active`, `service_scoped`, `service` |
-| POST | `/cred/keysets/generate` | — | New plain keyset, active |
-| POST | `/cred/keysets/activate` | `{id}` | Refuses a service keyset (`keyset-is-service-scoped`) |
-| POST | `/cred/keysets/deactivate` | `{id}` | Same |
-| GET | `/services` | — | All services, with plaintext allowlist keys |
-| GET | `/services/{name}` | — | One service, with its keys |
-| POST | `/services/create` | `{name, title, description?, expires?, max_issuance?}` | Makes the service and its keyset |
-| POST | `/services/update` | `{name, title?, description?, expires?, max_issuance?}` | Absent: unchanged. `null`: cleared |
-| POST | `/services/activate` | `{name}` | |
-| POST | `/services/deactivate` | `{name}` | |
-| POST | `/services/delete` | `{name}` | Only if inactive and it never issued; its keyset is deactivated |
-| POST | `/services/allowlist/add` | `{name, key}` | |
-| POST | `/services/allowlist/remove` | `{name, key}` | |
-
-`expires` and `max_issuance` must be `null` or a bare non-negative integer.
-
-### Services errors
-
-| Error | HTTP | Cause |
-|-------|------|-------|
-| `service-not-found` | 404 | No service by that name |
-| `service-inactive` | 400 | Service is deactivated |
-| `service-expired` | 400 | `expires` has passed |
-| `service-issuance-cap-reached` | 400 | This issue would pass `max_issuance` |
-| `service-access-denied` | 403 | Allowlist is set and `access_key` is missing or wrong |
-| `invalid-service-token` | 400 | A proof failed verification or names another keyset |
-| `duplicate-service-token` | 400 | One proof twice in a batch |
-| `duplicate-output` | 400 | Two outputs share an x-coordinate |
-| `missing-proofs`, `empty-proofs`, `missing-outputs`, `empty-outputs` | 400 | Missing or empty batch |
-| `invalid-service-name` | 400 | Name not 1–64 of `a-z 0-9 _ -`, or `list` |
-| `missing-name`, `missing-title`, `missing-key` | 400 | Required admin field missing |
-| `invalid-expires`, `invalid-max-issuance` | 400 | Not `null` or a non-negative integer |
-| `service-already-exists` | 409 | Name taken |
-| `deactivate-before-delete` | 400 | Delete while active |
-| `service-has-issued-tokens` | 400 | Delete of a service that ever issued (deactivate it instead) |
-| `keyset-is-service-scoped` | 400 | Cred activate/deactivate on a service's keyset |
+Services, policies (open, client keys, ships, ship rank), quotas, windows, check and burn
+modes, the NUT-22 routes, the Ames holder API and gating an app are in
+[`docs/tessera.md`](docs/tessera.md).
 
 ---
 
@@ -524,7 +362,8 @@ SHIP_URL=http://localhost:8080 URBAUTH_COOKIE='urbauth-~zod=0v…' npm run test:
 npm run test:p2pk        # one suite
 ```
 
-- They need both `%ecash` and `%ecash-services` installed on the ship.
+- They need both `%ecash` and `%tessera` installed on the ship. `test-tessera-ships.mjs` needs
+  three ships and runs on its own (see [`docs/tessera.md`](docs/tessera.md#testing)).
 - The Lightning suites use a mock LNbits (`mock-lnbits.mjs`).
 - Suites that change mint settings refuse a `SHIP_URL` that isn't this machine unless
   `ALLOW_DESTRUCTIVE=1`. **Never run the suites against a mint holding real value.**
@@ -538,8 +377,7 @@ See [`docs/hoon-testing.md`](docs/hoon-testing.md).
 ## State
 
 The `%ecash` agent is at **state 15**. It loads state 13 or later; a mint below 13 must first
-upgrade through commit `eb7b56a`. Credential and service data live in `%ecash-services`
-(state 1; it loads 0 or 1).
+upgrade through commit `eb7b56a`. Access tokens live in `%tessera` (state 0).
 
 | Field | Type | Description |
 |-------|------|-------------|

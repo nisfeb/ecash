@@ -55,34 +55,6 @@
 ::
 ::  -- keysets --
 ::
-::  the id cashu-ts 4.5.1 derives (deriveKeysetId, v1) for keys 1:G 2:2G
-::  1024:3G, with no fee and with 1500 ppk: pins the canonical string,
-::  including plain decimals ("1024", "1500"; scot gives "1.024")
-++  test-compute-ks-id-matches-cashu-ts
-  =/  keys=(map @ud @t)
-    %-  my
-    :~  [1 g-hex]
-        [2 g2-hex]
-        [1.024 '02f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9']
-    ==
-  ;:  weld
-    %+  expect-eq  !>('01f6087bf94d44a807db1093540aab2c211ec92a1e8eeeba5122bcf4b84a2fbe6a')
-    !>((compute-ks-id keys 'sat' 0 0))
-    %+  expect-eq  !>('0110262e7890585e5148fc3c58446fe78a615b8cb1cf46cb69d774f7ea1941aa9d')
-    !>((compute-ks-id keys 'sat' 1.500 0))
-  ==
-::
-::  keys come from the entropy, one per denomination: sha256(ent*2^64 + d)
-::  mod n, and a public key that matches each
-++  test-gen-ks-keys
-  =/  ks  (gen-ks-keys 5)
-  =/  privs  ~(val by privkeys.ks)
-  ;:  weld
-    (expect-eq !>(21) !>(~(wyt in (silt privs))))
-    (expect-eq !>((mod (shax (add (mul 5 (bex 64)) 1)) secp-n)) !>((~(got by privkeys.ks) 1)))
-    (expect-eq !>((pt-to-hex (pubkey (~(got by privkeys.ks) 1.024)))) !>((~(got by pubkeys.ks) 1.024)))
-  ==
-::
 ++  test-default-denoms-run-1-to-2-pow-20
   ;:  weld
     (expect-eq !>(21) !>((lent default-denoms)))
@@ -622,11 +594,5 @@
     (expect-eq !>(&) !>((keep-melt-quote q(state %paid) (add now (sub paid-melt-life ~s1)))))
     (expect-eq !>(|) !>((keep-melt-quote q(state %paid) (add now paid-melt-life))))
     (expect-eq !>(|) !>((keep-melt-quote q(state %unpaid) (add now ~s1))))
-  ==
-::
-++  test-dec-cord
-  ;:  weld
-    (expect-eq !>('1024') !>((dec-cord 1.024)))
-    (expect-eq !>('0') !>((dec-cord 0)))
   ==
 --

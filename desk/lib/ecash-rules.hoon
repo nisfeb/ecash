@@ -4,7 +4,7 @@
 ::  Lightning answer means, and how long a quote lives.
 ::
 /-  *ecash
-/+  *bdhke, *ecash-http
+/+  *bdhke, *ecash-http, *blind
 |%
 ::
 ::  -- keysets --
@@ -13,43 +13,8 @@
 ::  (max-batch - 20) * 2^20, about 84M sats.
 ++  default-denoms  ^-  (list @ud)  (turn (gulf 0 20) |=(i=@ud `@ud`(bex i)))
 ::
-::  gen-ks-keys: a keyset's private and public keys from entropy
-++  gen-ks-keys
-  |=  ent=@
-  ^-  [privkeys=(map @ud @) pubkeys=(map @ud @t)]
-  =/  privs=(map @ud @)
-    %-  malt
-    %+  turn  default-denoms
-    |=  d=@ud
-    ^-  [@ud @]
-    =/  k  (mod (shax (add (mul ent (bex 64)) d)) secp-n)
-    [d ?:(=(0 k) 1 k)]
-  [privs (~(run by privs) |=(k=@ (pt-to-hex (pubkey k))))]
-::
-::  dec-cord: plain decimal. (scot %ud 1024) is '1.024', which is not what
-::  wallets write for an amount, a fee or a key's denomination.
-++  dec-cord  |=(n=@ud `@t`(crip (a-co:co n)))
-::
-::  compute-ks-id: NUT-02 v2 keyset id, '01' || sha256(canonical), where
-::  canonical is "<amt>:<pk>,...|unit:<unt>[|input_fee_ppk:<n>][|final_expiry:<n>]"
-::  with amounts ascending
-++  compute-ks-id
-  |=  [keys=(map @ud @t) unt=@t input-fee-ppk=@ud final-expiry=@ud]
-  ^-  @t
-  =/  sorted=(list [@ud @t])
-    (sort ~(tap by keys) |=([a=[@ud @t] b=[@ud @t]] (lth -.a -.b)))
-  =/  pieces=(list @t)
-    :~  (rap 3 (join ',' (turn sorted |=([amt=@ud pub=@t] (rap 3 ~[(dec-cord amt) ':' pub])))))
-        '|unit:'
-        unt
-    ==
-  =?  pieces  (gth input-fee-ppk 0)
-    (weld pieces `(list @t)`~['|input_fee_ppk:' (dec-cord input-fee-ppk)])
-  =?  pieces  (gth final-expiry 0)
-    (weld pieces `(list @t)`~['|final_expiry:' (dec-cord final-expiry)])
-  ::  shax gives a little-endian atom; rev makes it the big-endian digest
-  ::  NUT-02 and cashu-ts hash to
-  (rap 3 ~['01' (pad-hex (rev 3 32 (shax (rap 3 pieces))) 64)])
+::  gen-ks-keys: a keyset's keys for the default denominations
+++  gen-ks-keys  |=(ent=@ (gen-keys ent default-denoms))
 ::
 ::  max-amount: the largest amount a keyset can always pay in max-batch
 ::  outputs. With power-of-two denominations up to top = 2^m, an amount a
@@ -336,16 +301,7 @@
   ?~  priv  (pairs:enjs:format ['error' s+'unknown-denomination']~)
   =/  pub  (biff (~(get by keys.ks) amt) hex-to-pt)
   ?~  pub  (pairs:enjs:format ['error' s+'unknown-denomination']~)
-  =/  c  (blind-sign u.b u.priv)
-  ::  the full B_ hex (02/03 differs for B_ and -B_) gives each output of
-  ::  one event its own nonce entropy
-  =/  dleq  (dleq-prove u.b c u.priv u.pub (shax (cat 3 b-hex (add ent amt))))
-  %-  pairs:enjs:format
-  :~  ['C_' s+(pt-to-hex c)]
-      ['amount' (numb:enjs:format amt)]
-      ['id' s+ks-id.ks]
-      ['dleq' (pairs:enjs:format ~[['e' s+(scalar-to-hex e.dleq)] ['s' s+(scalar-to-hex s.dleq)]])]
-  ==
+  (sign-blinded b-hex u.b amt ks-id.ks u.priv u.pub ent)
 ::
 ::  sign-outputs: sign a swap's or mint's outputs, each under its own keyset
 ++  sign-outputs
@@ -381,12 +337,6 @@
     ?~  ks  (pairs:enjs:format ['error' s+'unknown-keyset']~)
     (sign-one i.outputs i.amounts u.ks (add ent idx))
   $(amounts t.amounts, outputs t.outputs, idx +(idx), acc [sig acc])
-::
-::  all-signed: did every output get a signature, not an error object?
-++  all-signed
-  |=  sigs=(list json)
-  ^-  ?
-  (levy sigs |=(j=json &(?=([%o *] j) (has-key p.j 'C_'))))
 ::
 ::  restore-entries: NUT-09 records (B_ -> signature) for a batch, pairing
 ::  outputs and signatures by index. Error results are skipped.
